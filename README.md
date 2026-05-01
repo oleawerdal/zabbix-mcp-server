@@ -47,7 +47,7 @@ The server runs as a standalone HTTP service. AI clients connect to it over the 
 ## Features
 
 - **Complete API coverage** - All 58 Zabbix API groups (231 tools): hosts, problems, triggers, templates, users, dashboards, and more
-- **Extension tools** - `graph_render` (PNG export), `anomaly_detect` (z-score analysis), `capacity_forecast` (linear regression), `report_generate` (PDF reports), `action_prepare`/`action_confirm` (two-step write approval)
+- **Extension tools** - `graph_render` (PNG export), `anomaly_detect` (z-score analysis), `capacity_forecast` (linear regression), `item_threshold_search` (filter items by `lastvalue` thresholds), `report_generate` (PDF reports), `action_prepare`/`action_confirm` (two-step write approval)
 - **Admin web portal** - Full web UI on port 9090 for managing tokens, users, servers, templates, settings, and audit log; dark/light mode; point-and-click **Client MCP Wizard (beta)** that generates copy-paste-ready config snippets for 14 AI clients (Claude, Codex, Cursor, Cline, VS Code, JetBrains, Goose, Open WebUI, 5ire, Gemini CLI, n8n, ...)
 - **Multi-token authentication** - Named tokens with scopes, IP restrictions, server binding, expiry; managed via admin portal, CLI (`generate-token`), or config.toml
 - **Multi-server support** - Connect to multiple Zabbix instances (production, staging, ...) with separate tokens
@@ -827,7 +827,7 @@ Or use group names as shortcuts (pulls in more tools per group):
 | `data_collection` | ~107 | template, templategroup, templatedashboard, valuemap, dashboard |
 | `users` | ~30 | user, usergroup, userdirectory, usermacro, token, role, mfa |
 | `administration` | ~39 | settings, housekeeping, authentication, maintenance, map, proxy, ... |
-| `extensions` | ~9 | graph_render, anomaly_detect, capacity_forecast, report_generate, ... |
+| `extensions` | ~10 | graph_render, anomaly_detect, capacity_forecast, item_threshold_search, report_generate, ... |
 
 The same mechanism works per-token via `[tokens.*].scopes` - see [MCP Authentication](#mcp-authentication-optional).
 
