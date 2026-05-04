@@ -60,25 +60,24 @@
                 </td>
                 {% endif %}
                 <td class="cell-truncate">
-                    {# No native title="..." here - the cell-truncate max-width
-                       only kicks in for very long names, and when it does
-                       the styled CSS tooltip on hover (data-tooltip on the
-                       link) is the right surface to show the full text.
-                       The native title="..." created a duplicate plain
-                       browser tooltip stacking on top of the badge's
-                       styled one - reported 2026-05-04 as a glitch. #}
-                    <a href="/tokens/{{ token.id }}" class="text-primary" style="font-weight:500;">{{ token.name }}</a>
+                    {# Legacy "!" pill rendered FIRST (left of the name)
+                       so a long token name truncating with ellipsis
+                       does not eat the badge - reported 2026-05-04.
+                       Plus data-tooltip on the link itself shows the
+                       full name on hover when the cell-truncate
+                       ellipsis kicks in. #}
                     {% if token.is_legacy %}
-                    {# Compact "!" pill in warning yellow. Visual the
-                       user signed off on, with the tooltip clipping
-                       fix applied to .table-container so the popup
-                       actually shows above the row this time. #}
                     <span class="badge badge-warning"
-                          style="margin-left:4px; cursor:pointer; min-width:20px; padding:2px 6px; justify-content:center;"
+                          style="margin-right:6px; cursor:pointer; min-width:20px; padding:2px 6px; justify-content:center;"
                           tabindex="0" role="button"
                           aria-label="Legacy token migrated from auth_token"
                           data-tooltip="Legacy: migrated from the legacy auth_token in config.toml. Recommended: create a new token with proper scopes, server restrictions and IP limits, then remove the legacy auth_token from config.">!</span>
                     {% endif %}
+                    <a href="/tokens/{{ token.id }}"
+                       class="text-primary"
+                       style="font-weight:500;"
+                       tabindex="0"
+                       data-tooltip="{{ token.name }}">{{ token.name }}</a>
                 </td>
                 <td>
                     <code class="monospace">{{ token.token_prefix }}</code>
