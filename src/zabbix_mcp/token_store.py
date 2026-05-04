@@ -159,7 +159,12 @@ class TokenStore:
                     allowed_ips = raw_ips
 
             hash_value = token_hash.split(":", 1)[1] if ":" in token_hash else token_hash
-            token_prefix = hash_value[:12] + "..."
+            # Last-4 suffix instead of first-12 prefix - reported
+            # 2026-05-04 as a "this column is too wide" issue on
+            # /tokens. Last 4 hex chars are still enough to tell
+            # tokens apart at a glance, and the leading "..." flips
+            # the visual cue so the eye reads the part that varies.
+            token_prefix = "..." + hash_value[-4:]
 
             # allow_raw_json must be a real bool; reject string ``"true"`` /
             # ``"false"`` etc. that an operator might typo into config.toml.
@@ -213,7 +218,10 @@ class TokenStore:
         """
         hex_hash = hashlib.sha256(auth_token.encode()).hexdigest()
         token_hash = f"sha256:{hex_hash}"
-        prefix = auth_token[:12] if len(auth_token) > 12 else auth_token[:4] + "..."
+        # Match the suffix-style display used by load_from_config -
+        # legacy entries were the only place still showing the
+        # leading-prefix pattern.
+        prefix = "..." + hex_hash[-4:]
         info = TokenInfo(
             id="_legacy",
             name="Legacy Token",
