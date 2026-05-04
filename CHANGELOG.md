@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased (feature/v1.30)
+## v1.30 - 2026-05-05
 
-External-feedback release. After v1.29 went out, two pieces of feedback surfaced from the wider MCP community: an external review by [Quadrata Insights](https://www.quadratainsights.com) flagged that Claude has to chain too many low-level Zabbix calls (`host_get` -> `interface_get` -> `problem_get` -> `item_get` -> `history_get`) just to answer "what's wrong with web01"; and discussion #27 asked for a one-shot way to obtain a Let's Encrypt certificate when the MCP server terminates TLS itself. v1.30 addresses both.
+External-feedback release. Three threads of feedback land together: an external review by [Quadrata Insights](https://www.quadratainsights.com) flagged that Claude has to chain too many low-level Zabbix calls (`host_get` -> `interface_get` -> `problem_get` -> `item_get` -> `history_get`) just to answer "what's wrong with web01"; discussion #27 asked for a one-shot way to obtain a Let's Encrypt certificate when the MCP server terminates TLS itself; and field-test feedback caught two operator-hygiene gaps (manual GitHub-update poll, in-portal OAuth enable). v1.30 addresses all three plus a pre-release security/code-review pass.
 
 ### Added
 
@@ -14,6 +14,8 @@ External-feedback release. After v1.29 went out, two pieces of feedback surfaced
   - All four reuse the existing `_filter_active_problems` helper so they stay consistent with `problem_active_get`. Each is registered in `monitoring` and `extensions` so monitoring-only tokens see them after the per-token tools/list filter.
 - **`./deploy/install.sh request-tls` subcommand** automates Let's Encrypt issuance when the MCP server terminates TLS itself (discussion #27). Wraps `certbot certonly` (auto-detects standalone vs webroot based on whether anything is bound to :80 already), symlinks `fullchain.pem` / `privkey.pem` into `/etc/zabbix-mcp/tls/`, idempotently writes `[server].tls_cert_file` and `[server].tls_key_file` into `config.toml`, installs a deploy hook at `/etc/letsencrypt/renewal-hooks/deploy/zabbix-mcp-server.sh` so post-renewal the service auto-reloads, and enables `certbot.timer`. Re-runnable any time you rotate or add a hostname. Usage: `sudo ./deploy/install.sh request-tls --hostname mcp.example.com --email you@example.com`.
 - **"Check now" button** on the admin portal header next to the version pill, wired to a new `/api/check-updates` endpoint that calls `force_check()` on the update checker. Forces a fresh GitHub release poll bypassing the 60-second throttle - useful right after an upgrade to confirm the new version registered without having to wait the cache out.
+- **In-portal OAuth enable form** on the OAuth Clients page empty state. Replaces the "edit config.toml manually" wall of text with a Public URL field + dynamic-registration toggle + Submit. HTTPS enforcement client-side and server-side (HTTP rejected with the explanation that ChatGPT and Claude Desktop refuse cleartext discovery; localhost still allowed for dev loops). Admin role only. Audit log entry `oauth.enable`. Restart-needed badge raised on save. End-to-end-tested with the actual ChatGPT custom apps OAuth flow against a Rocky 9 deployment.
+- **`[admin].enabled` read-only indicator** in Settings -> Admin Portal. Earlier versions deliberately removed the toggle ("textbook foot-gun"); v1.30 re-adds it as a disabled visual element so the operator can see the current state and the tooltip explains the SSH-edit recovery path. No POST handler change - the toggle is purely informational.
 
 ### Security
 
