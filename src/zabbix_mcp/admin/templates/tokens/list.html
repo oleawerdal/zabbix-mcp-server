@@ -82,12 +82,24 @@
                           aria-label="Legacy token migrated from auth_token"
                           data-tooltip="Legacy: migrated from the legacy auth_token in config.toml. Recommended: create a new token with proper scopes, server restrictions and IP limits, then remove the legacy auth_token from config.">!</span>
                     {% endif %}
-                    <span class="name-cell tooltip-right" tabindex="0"
-                          data-tooltip="{{ token.name }}">
+                    {# Native title="..." attribute for the truncated-name
+                       tooltip. The custom CSS popover tried this first
+                       (data-tooltip) but a 100+ char token name forces
+                       it onto two wrapped lines AND the absolute
+                       positioning has no viewport-edge clamp, so on
+                       narrow screens the popover ends up clipped by
+                       the right edge of the table-container. The
+                       native title attribute uses the browser's own
+                       smart positioning (autoflips to the side that
+                       fits) and word-wrap, so it never gets cut off.
+                       Visual is plainer than the styled popover but
+                       works at every viewport width without JS. #}
+                    <span class="name-cell">
                         <span class="name-trunc">
                             <a href="/tokens/{{ token.id }}"
                                class="text-primary"
-                               style="font-weight:500;">{{ token.name }}</a>
+                               style="font-weight:500;"
+                               data-name="{{ token.name }}">{{ token.name }}</a>
                         </span>
                     </span>
                 </td>
@@ -260,4 +272,24 @@
         </tbody>
     </table>
 </div>
+
+<script>
+/* Add the native title="..." attribute ONLY to <a> links whose
+   .name-trunc parent is actually ellipsized. Reported 2026-05-04 -
+   "the full-text tooltip should only appear on names that end with
+   ... ". scrollWidth > clientWidth is the standard ellipsis-
+   detection pattern, run once on initial load (the rows are server-
+   rendered and the column width does not change without a reload).
+   data-name="..." carries the full token name into the DOM so we
+   do not have to re-fetch it; the JS reads that and writes it to
+   title= when truncation is detected. */
+(function() {
+    document.querySelectorAll('table.tokens-list .name-trunc').forEach(function(inner) {
+        if (inner.scrollWidth > inner.clientWidth) {
+            var link = inner.querySelector('a[data-name]');
+            if (link) link.setAttribute('title', link.dataset.name);
+        }
+    });
+})();
+</script>
 {% endblock %}
