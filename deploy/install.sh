@@ -2018,18 +2018,22 @@ do_request_tls() {
     # Permissions: certbot defaults to root:root 0600 on privkey.pem
     # which the unprivileged $SERVICE_USER cannot read - the service
     # crashes on boot with PermissionError on ctx.load_cert_chain().
-    # Fix: chgrp the live/ + archive/ directories to $SERVICE_USER and
-    # chmod 0750 (group traversal only - non-MCP local users still
-    # cannot list which certs are issued, defense in depth against
-    # certificate-subject enumeration), then chgrp + 0640 the privkey
-    # so only root and the service user can read it. Files live in
-    # archive/; live/ is just a symlink lineage to the latest set.
+    # Minimum-privilege fix:
+    #   - privkey -> 0440 root:$SERVICE_USER. Read-only for both
+    #     (root keeps full access via CAP_DAC_OVERRIDE; certbot writes
+    #     a new privkeyN.pem on each renewal, never modifies existing).
+    #   - live/ + archive/ dirs -> 0710 root:$SERVICE_USER. Group has
+    #     ONLY traversal (--x) so $SERVICE_USER can open the specific
+    #     /etc/letsencrypt/live/<host>/privkey.pem path it knows but
+    #     cannot 'ls' the directory - no certificate-subject enumeration
+    #     even for the service user, defense-in-depth against an MCP
+    #     RCE wanting to scan which domains are hosted on the box.
     chgrp "$SERVICE_USER" /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
-    chmod 0750 /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
+    chmod 0710 /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
     if [[ -d "/etc/letsencrypt/archive/$hostname" ]]; then
         chgrp "$SERVICE_USER" /etc/letsencrypt/archive/"$hostname"/privkey*.pem 2>/dev/null || true
-        chmod 0640 /etc/letsencrypt/archive/"$hostname"/privkey*.pem 2>/dev/null || true
-        ok "Permissions: $SERVICE_USER granted read on /etc/letsencrypt/archive/$hostname/privkey*.pem (live/+archive/ at 0750 root:$SERVICE_USER)"
+        chmod 0440 /etc/letsencrypt/archive/"$hostname"/privkey*.pem 2>/dev/null || true
+        ok "Permissions: privkey 0440 root:$SERVICE_USER, live/+archive/ at 0710 (group traversal-only, no listing)"
     fi
 
     # Wire the symlinks into config.toml. Idempotent: existing keys are
@@ -2077,15 +2081,20 @@ if [[ -n "\${RENEWED_LINEAGE:-}" ]]; then
         # certbot resets privkey to 0600 root:root on every renewal,
         # so we re-grant read to \$SERVICE_USER here. Without this the
         # service would crash on the next boot with PermissionError.
+        # 0440 = read-only for both root and service user; root keeps
+        # full access via CAP_DAC_OVERRIDE; certbot only ever writes
+        # NEW privkeyN.pem files, so the read-only mode is safe.
         chgrp "$SERVICE_USER" "\$archive_dir"/privkey*.pem 2>/dev/null || true
-        chmod 0640 "\$archive_dir"/privkey*.pem 2>/dev/null || true
+        chmod 0440 "\$archive_dir"/privkey*.pem 2>/dev/null || true
     fi
 fi
-# Re-apply the 0750 root:\$SERVICE_USER directory mode in case certbot
-# reset it. This keeps non-MCP local users from enumerating issued
-# certificate subjects via 'ls /etc/letsencrypt/live/'.
+# Re-apply the 0710 root:\$SERVICE_USER directory mode in case certbot
+# reset it. Group has --x (traversal only) - the service user can open
+# /etc/letsencrypt/live/<host>/<file> by full path but cannot 'ls' the
+# directory, so even an MCP RCE cannot enumerate which domains live
+# on the host.
 chgrp "$SERVICE_USER" /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
-chmod 0750 /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
+chmod 0710 /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
 systemctl reload-or-restart "$SERVICE_NAME" 2>/dev/null || systemctl restart "$SERVICE_NAME"
 HOOK
     chmod 755 "$hook_path"
