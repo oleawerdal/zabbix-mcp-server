@@ -95,19 +95,31 @@ def _render_error_page(message: str, *, status_code: int = 400) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 
-def _verify_admin_user(config: Any, username: str, password: str) -> bool:
+# Role -> maximum OAuth scope an operator with that role may grant
+# to a third-party MCP client.  An operator cannot grant a scope wider
+# than their own admin-portal role allows; this is the OAuth-side
+# expression of "least privilege" the admin portal already enforces
+# elsewhere.
+_ROLE_SCOPE_CAP: dict[str, set[str]] = {
+    "admin":    {"*"},
+    "operator": {"monitoring", "data_collection", "alerts", "extensions"},
+    "viewer":   {"monitoring", "extensions"},
+}
+
+
+def _verify_admin_user(config: Any, username: str, password: str) -> tuple[bool, str]:
     """Validate (username, password) against [admin.users.*] in config.
 
-    Returns True when the user exists, is not disabled, and the
-    password matches.  Wrong username and wrong password both return
-    False with the same code path so the response time does not leak
-    which side mismatched.
+    Returns ``(authenticated, role)``.  ``role`` is the empty string
+    when authentication failed.  Wrong username and wrong password
+    both return False with the same code path so the response time
+    does not leak which side mismatched.
     """
     if not username or not password:
-        return False
+        return False, ""
     cfg_path = getattr(config, "_config_path", None)
     if not cfg_path:
-        return False
+        return False, ""
     try:
         from zabbix_mcp.admin.config_writer import load_config_document
         from zabbix_mcp.admin.auth import verify_password
@@ -115,13 +127,20 @@ def _verify_admin_user(config: Any, username: str, password: str) -> bool:
         users = (doc.get("admin", {}) or {}).get("users", {}) or {}
         user = users.get(username)
         if user is None:
-            return False
+            return False, ""
         if user.get("disabled"):
-            return False
-        return bool(verify_password(password, str(user.get("password_hash", ""))))
+            return False, ""
+        if not verify_password(password, str(user.get("password_hash", ""))):
+            return False, ""
+        return True, str(user.get("role", "viewer") or "viewer")
     except Exception as exc:  # pragma: no cover
         logger.warning("Admin user verification failed for %s: %s", username, exc)
-        return False
+        return False, ""
+
+
+def _scope_cap_for_role(role: str) -> set[str]:
+    """Return the set of OAuth scope IDs an operator with ``role`` may grant."""
+    return _ROLE_SCOPE_CAP.get(role, _ROLE_SCOPE_CAP["viewer"])
 
 
 # ---------------------------------------------------------------------------
@@ -146,49 +165,62 @@ def _scopes_for_consent_ui(requested: list[str]) -> list[dict[str, Any]]:
     Each row gets a human label, a description, and a tool-count badge
     so the operator can decide row-by-row what to grant.  Wildcard
     ``*`` is rendered with a warning frame to flag the unlimited scope.
+
+    When the client asked for ``*`` (or supplied no scope at all), we
+    render the full catalog (all six groups) under the wildcard row so
+    the operator can untick ``*`` and pick narrower groups instead.
+    Without that expansion the consent screen has only one checkbox
+    and unticking it sends the operator to the empty-grant error.
     """
     from zabbix_mcp.config import TOOL_GROUPS, _expand_tool_groups
     try:
         from zabbix_mcp.api import ALL_METHODS
-        all_method_count = len(ALL_METHODS)
+        all_methods = list(ALL_METHODS)
+        all_method_count = len(all_methods)
     except Exception:
+        all_methods = []
         all_method_count = 0
 
-    rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    # If client did not list any scopes, fall back to "*" so the operator
-    # has something to consent to (matches the existing default-grant
-    # behaviour).
-    items = list(requested) or ["*"]
-    for sid in items:
-        if sid in seen:
-            continue
-        seen.add(sid)
-        label, desc = _SCOPE_LABELS.get(sid, (sid, "Custom scope - covers a single tool prefix."))
-        # Tool count: count ALL_METHODS rows whose tool_name prefix is in the
-        # expanded group, plus any extension tools listed by name.
+    def _count(sid: str) -> int:
         if sid == "*":
-            count = all_method_count + len(TOOL_GROUPS.get("extensions", []))
-        else:
-            try:
-                expanded = set(_expand_tool_groups([sid]))
-                count = sum(
-                    1 for m in (
-                        __import__("zabbix_mcp.api", fromlist=["ALL_METHODS"]).ALL_METHODS
-                    )
-                    if (m.tool_name.rsplit("_", 1)[0] if "_" in m.tool_name else m.tool_name) in expanded
-                )
-                # Add named extension tools if scope expands to them
-                ext_tools = set(TOOL_GROUPS.get("extensions", []))
-                count += sum(1 for t in ext_tools if t in expanded)
-            except Exception:
-                count = 0
+            return all_method_count + len(TOOL_GROUPS.get("extensions", []))
+        try:
+            expanded = set(_expand_tool_groups([sid]))
+            n = sum(
+                1 for m in all_methods
+                if (m.tool_name.rsplit("_", 1)[0] if "_" in m.tool_name else m.tool_name) in expanded
+            )
+            n += sum(1 for t in TOOL_GROUPS.get("extensions", []) if t in expanded)
+            return n
+        except Exception:
+            return 0
+
+    requested = list(requested) or ["*"]
+    has_wildcard = "*" in requested
+
+    # When client asked for "*", offer the wildcard row checked + the
+    # six concrete groups unchecked so the operator can downscope.
+    # When client asked for specific groups, show only those and pre-tick
+    # them (the operator can untick what they do not want to grant).
+    rows: list[dict[str, Any]] = []
+    if has_wildcard:
+        ids = ["*"] + list(TOOL_GROUPS.keys())
+    else:
+        ids = list(dict.fromkeys(requested))  # preserve order, drop dupes
+
+    for sid in ids:
+        label, desc = _SCOPE_LABELS.get(
+            sid, (sid, "Custom scope - covers a single tool prefix."),
+        )
         rows.append({
             "id": sid,
             "label": label,
             "description": desc,
-            "tool_count": count,
-            "checked": True,
+            "tool_count": _count(sid),
+            # Wildcard pre-checked (matches the requested grant); the six
+            # concrete groups start unchecked so unticking * exposes
+            # them for explicit selection.
+            "checked": (sid in requested),
         })
     return rows
 
@@ -287,7 +319,8 @@ def _handle_login_step(
     username = str(form.get("username", "") or "").strip()
     password = str(form.get("password", "") or "")
 
-    if not _verify_admin_user(config, username, password):
+    authenticated, role = _verify_admin_user(config, username, password)
+    if not authenticated:
         _oauth_login_limiter.record_attempt(client_ip)
         write_audit(
             action="oauth.login_failed",
@@ -309,23 +342,43 @@ def _handle_login_step(
 
     _oauth_login_limiter.reset(client_ip)
     pending.authenticated_subject = username
+    pending.authenticated_role = role
     write_audit(
         action="oauth.login_success",
         user=username,
         target_type="oauth_client",
         target_id=str(pending.client.client_id or ""),
-        details={"client_name": pending.client.client_name or "", "stage": "credentials_verified"},
+        details={"client_name": pending.client.client_name or "", "role": role, "stage": "credentials_verified"},
         ip=client_ip or "",
     )
 
     requested_scopes = list(pending.params.scopes or [])
     has_wildcard = (not requested_scopes) or ("*" in requested_scopes)
+    cap = _scope_cap_for_role(role)
+    rows = _scopes_for_consent_ui(requested_scopes)
+    # Apply role cap: scopes outside the operator's cap render disabled
+    # with a "needs admin role" hint, so a viewer cannot accidentally
+    # grant administration / users to a third-party client.
+    can_grant_wildcard = "*" in cap
+    for row in rows:
+        if can_grant_wildcard:
+            row["disabled"] = False
+        else:
+            allowed_for_this_role = row["id"] in cap
+            row["disabled"] = not allowed_for_this_role
+            if row["disabled"]:
+                row["checked"] = False
+                row["description"] = (
+                    row["description"]
+                    + f"  -- not available to your role ({role}); ask an admin."
+                )
     return HTMLResponse(_render_template(
         "oauth_consent.html",
         request_id=request_id,
         client_name=(pending.client.client_name or "").strip() or str(pending.client.client_id or ""),
         subject=username,
-        scopes=_scopes_for_consent_ui(requested_scopes),
+        subject_role=role,
+        scopes=rows,
         has_wildcard_request=has_wildcard,
     ))
 
@@ -392,15 +445,34 @@ def _handle_consent_step(
     if "*" in requested_scopes or not requested_scopes:
         requested_scopes |= {"*"}
         # When client requested wildcard, any scope set is allowed
-        allowed_grant = granted
+        candidate_grant = list(granted)
     else:
         # Reject any scope the client did not originally request
-        allowed_grant = [s for s in granted if s in requested_scopes]
-        if not allowed_grant:
+        candidate_grant = [s for s in granted if s in requested_scopes]
+        if not candidate_grant:
             return _render_error_page(
                 "Granted scopes do not match what the client requested.",
                 status_code=400,
             )
+
+    # Cap by operator role -- a viewer cannot grant administration /
+    # users no matter what the form posted.  Server-side check; the
+    # disabled checkboxes in the consent UI are only a hint.
+    cap = _scope_cap_for_role(pending.authenticated_role or "viewer")
+    if "*" in cap:
+        allowed_grant = candidate_grant
+    else:
+        allowed_grant = [s for s in candidate_grant if s in cap]
+        # Reject the wildcard request from a non-admin operator entirely.
+        if "*" in candidate_grant and "*" not in cap:
+            allowed_grant = [s for s in allowed_grant if s != "*"]
+    if not allowed_grant:
+        return _render_error_page(
+            "None of the scopes you ticked are within your role's grant "
+            "capability. Ask an admin to log in instead, or pick narrower "
+            "scopes the client can use.",
+            status_code=403,
+        )
 
     redirect_url = provider.complete_pending(
         request_id, allowed_grant, subject=subject,

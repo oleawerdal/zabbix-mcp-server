@@ -128,13 +128,16 @@ class _PendingAuthorization:
     seeing what the third-party client will be allowed to do.
     """
 
-    __slots__ = ("client", "params", "expires_at", "authenticated_subject")
+    __slots__ = ("client", "params", "expires_at", "authenticated_subject", "authenticated_role")
 
     def __init__(self, client: OAuthClientInformationFull, params: AuthorizationParams, ttl_seconds: int = _AUTH_CODE_TTL_SECONDS) -> None:
         self.client = client
         self.params = params
         self.expires_at = time.time() + ttl_seconds
         self.authenticated_subject: str | None = None
+        # Role of the operator who logged in (admin/operator/viewer);
+        # caps which scopes this consent step can grant.
+        self.authenticated_role: str | None = None
 
 
 class ZmcpOAuthProvider:

@@ -39,9 +39,12 @@
         }
         .consent-scope-row:hover { background: var(--bg-hover); }
         .consent-scope-row.wildcard { background: var(--color-warning-light); border-color: var(--color-warning); }
+        .consent-scope-row.disabled { opacity: 0.5; cursor: not-allowed; }
+        .consent-scope-row.disabled:hover { background: var(--bg-input); }
         .consent-scope-row input[type=checkbox] {
             width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--color-primary);
         }
+        .consent-scope-row input[type=checkbox]:disabled { cursor: not-allowed; }
         .consent-scope-meta {
             flex: 1; min-width: 0;
         }
@@ -89,7 +92,7 @@
             <h1 class="login-title">Allow access?</h1>
 
             <div class="consent-greeting">
-                Signed in as <strong>{{ subject }}</strong>. <strong>{{ client_name }}</strong> wants to call MCP tools on your behalf.
+                Signed in as <strong>{{ subject }}</strong>{% if subject_role %} ({{ subject_role }} role){% endif %}. <strong>{{ client_name }}</strong> wants to call MCP tools on your behalf.
             </div>
 
             {% if has_wildcard_request %}
@@ -104,8 +107,8 @@
                 <input type="hidden" name="step" value="consent">
 
                 {% for scope in scopes %}
-                <label class="consent-scope-row{% if scope.id == '*' %} wildcard{% endif %}">
-                    <input type="checkbox" name="scope" value="{{ scope.id }}" {% if scope.checked %}checked{% endif %}>
+                <label class="consent-scope-row{% if scope.id == '*' %} wildcard{% endif %}{% if scope.disabled %} disabled{% endif %}">
+                    <input type="checkbox" name="scope" value="{{ scope.id }}" {% if scope.checked %}checked{% endif %} {% if scope.disabled %}disabled{% endif %}>
                     <div class="consent-scope-meta">
                         <div class="consent-scope-name">{{ scope.label }}</div>
                         <div class="consent-scope-desc">{{ scope.description }}</div>
@@ -123,7 +126,7 @@
             </form>
 
             <div class="consent-disclaimer">
-                Your choice is recorded in the audit log. You can revoke this client at any time from the admin portal under <a href="/oauth-clients" style="color: inherit; text-decoration: underline;">OAuth Clients</a>.
+                Your choice is recorded in the audit log. To revoke this client later, sign in to the Zabbix MCP admin portal and open the OAuth Clients page.
             </div>
         </div>
         <div class="login-footer">
