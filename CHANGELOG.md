@@ -1,16 +1,6 @@
 # Changelog
 
-## v1.27 - unreleased
-
-### Added
-
-- **`frontend_username` / `frontend_password` fields in the Servers Edit form** (admin portal). v1.26 shipped the wrapper code that uses these for `graph_render`'s frontend-cookie login, but the fields were only reachable via direct `config.toml` editing. The form now has a "Graph rendering (optional)" fieldset under Request timeout, with the same "leave password empty to keep current" semantics the API token uses. Username writes through unconditionally; clearing the username also drops a stored password so we never leave an orphan secret. Reported in field after the v1.26 upgrade - operator opened the admin UI looking for a place to set the new feature, found nothing, and had to be pointed at `/etc/zabbix-mcp/config.toml`.
-
-### Fixed
-
-- **Dashboard "Active Tasks" panel - missing tooltips and zero gap to "Recent Activity"**. The four stat tiles (Live tasks, Oldest task, Default TTL, TTL ceiling) shipped without the per-metric `tooltip-icon` that the rest of the admin portal uses, so an operator landing on the dashboard had no way to learn what each number means without reading the CHANGELOG. Each tile now has a `&#x1F6C8;` icon next to its label with a hover-revealed explanation (cap, sweeper interaction, ttl-override semantics). The panel title also got a tooltip pointing at the MCP 2025-11-25 Tasks API. Side fix: the "Recent Activity" card had no `margin-top`, so it visually merged with the bottom of the Active Tasks card; added the standard `1.5em` to match the spacing every other dashboard card uses.
-
-### Planned
+## v1.28 - planned
 
 - Dynamic tools/list filtering by token scopes (issue #38, port from
   @fenbays fork). A monitoring-only token sees only the monitoring
@@ -24,6 +14,19 @@
 - OAuth 2.0 / OIDC discovery for mcp-remote and Claude Desktop remote
   (issue #36) - exposes `/.well-known/oauth-authorization-server` so
   remote clients can negotiate auth without a hardcoded bearer.
+
+## v1.27 - 2026-05-04
+
+Quick admin-portal polish release immediately after v1.26 hit production. Three field-reported friction points from the v1.26 upgrade flow.
+
+### Added
+
+- **`frontend_username` / `frontend_password` fields in the Servers Edit form** (admin portal). v1.26 shipped the wrapper code that uses these for `graph_render`'s frontend-cookie login, but the fields were only reachable via direct `config.toml` editing. The form now has a "Graph rendering (optional)" fieldset under Request timeout, with the same "leave password empty to keep current" semantics the API token uses. Username writes through unconditionally; clearing the username also drops a stored password so we never leave an orphan secret. Reported in field after the v1.26 upgrade - operator opened the admin UI looking for a place to set the new feature, found nothing, and had to be pointed at `/etc/zabbix-mcp/config.toml`.
+
+### Fixed
+
+- **Dashboard "Active Tasks" panel - missing tooltips and zero gap to "Recent Activity"**. The four stat tiles (Live tasks, Oldest task, Default TTL, TTL ceiling) shipped without the per-metric `tooltip-icon` that the rest of the admin portal uses, so an operator landing on the dashboard had no way to learn what each number means without reading the CHANGELOG. Each tile now has a `&#x1F6C8;` icon next to its label with a hover-revealed explanation (cap, sweeper interaction, ttl-override semantics). The panel title also got a tooltip pointing at the MCP 2025-11-25 Tasks API. Side fix: the "Recent Activity" card had no `margin-top`, so it visually merged with the bottom of the Active Tasks card; added the standard `1.5em` to match the spacing every other dashboard card uses.
+- **Inconsistent sort glyphs on table headers**. The previous CSS used a single `↕` (U+2195) for the unsorted state and switched to `↑` / `↓` (U+2191 / U+2193) on the active column. DejaVu / Noto / SF Pro draw the `↕` glyph at a different baseline and width than the single arrows, so the unsorted columns looked off-pattern next to the sorted one - field-reported on the audit log header strip ("the leftmost is OK, the others are shit"). Replaced with a stacked `▲▼` pair built from `::before` + `::after` pseudo-elements on every `.sortable` `th`. Active direction shows in the primary accent color at full opacity; the opposite arrow fades to 0.15. Hover nudges both arrows to 0.7 so the column reads as clickable even when no sort is active. Generic CSS rule = consistent fix across audit log, tokens list, users list - everywhere a sortable table header lives.
 
 ## v1.26 - 2026-05-02
 

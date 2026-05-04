@@ -536,63 +536,91 @@ th {
     user-select: none;
 }
 
-/* Sortable column header - stacked ▲▼ pair on every sortable
-   column, fades the inactive arrow when one direction is active.
-   Was a single ↕ glyph (U+2195) before, which renders inconsistently
-   across system fonts (DejaVu / Noto / SF Pro all draw it slightly
-   different and at different baselines vs. the ↑/↓ active state),
-   so the unsorted columns looked off-pattern next to the active one. */
+/* Sortable column header - inline ↑ + ↓ pair sitting immediately
+   after the header text. Operator-friendly: both arrows always
+   visible so the column reads as toggleable, the active direction
+   lights up in the primary accent color at full opacity + bold,
+   the inactive arrow fades to 0.15. Hover lifts both to ~0.7
+   when no direction is active.
+   Two iterations ago this was a single ↕ glyph (U+2195) that
+   rendered differently from the ↑/↓ active state across DejaVu /
+   Noto / SF Pro - the active vs inactive baselines did not match.
+   One iteration ago it was an absolute-positioned stacked ▲▼ pair
+   on the right edge of the column - cleaner glyphs but visually
+   detached from the text label. Reported 2026-05-04: sort buttons
+   should sit directly next to the text, not on the far right. */
 th.sortable {
     cursor: pointer;
-    position: relative;
-    padding-right: 28px;
 }
 
-th.sortable::before,
-th.sortable::after {
-    position: absolute;
-    right: 10px;
-    font-size: 0.65rem;
+.sort-arrows {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 0.85em;
+    line-height: 1;
+    letter-spacing: 1px;
+    user-select: none;
+    pointer-events: none;
+    white-space: nowrap;
+}
+.sort-arrows .sort-arrow {
+    color: currentColor;
+    opacity: 0.3;
+    font-weight: 400;
+    transition: opacity 0.12s ease, color 0.12s ease, font-weight 0.12s ease;
+}
+th.sortable.sort-asc .sort-arrows .sort-arrow-up {
+    opacity: 1;
+    color: var(--color-primary, var(--text-primary));
+    font-weight: 700;
+}
+th.sortable.sort-asc .sort-arrows .sort-arrow-down {
+    opacity: 0.15;
+}
+th.sortable.sort-desc .sort-arrows .sort-arrow-down {
+    opacity: 1;
+    color: var(--color-primary, var(--text-primary));
+    font-weight: 700;
+}
+th.sortable.sort-desc .sort-arrows .sort-arrow-up {
+    opacity: 0.15;
+}
+th.sortable:hover .sort-arrows .sort-arrow {
+    opacity: 0.7;
+}
+th.sortable.sort-asc:hover .sort-arrows .sort-arrow-down,
+th.sortable.sort-desc:hover .sort-arrows .sort-arrow-up {
+    opacity: 0.4;
+}
+
+/* BC fallback: any th.sortable WITHOUT explicit .sort-arrows spans
+   gets a ::after pseudo with the same dual-arrow content. Active
+   direction collapses to the single highlighted arrow. Used by any
+   template that has not yet been migrated. */
+th.sortable:not(:has(.sort-arrows))::after {
+    content: '\2191\2009\2193';
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 0.85em;
     line-height: 1;
     color: currentColor;
     opacity: 0.3;
-    transition: opacity 0.12s ease;
-    pointer-events: none;
+    letter-spacing: 1px;
 }
-
-th.sortable::before {
-    content: '\25B2';        /* ▲ U+25B2 BLACK UP-POINTING TRIANGLE */
-    top: calc(50% - 0.65em - 1px);
-}
-
-th.sortable::after {
-    content: '\25BC';        /* ▼ U+25BC BLACK DOWN-POINTING TRIANGLE */
-    top: calc(50% + 1px);
-}
-
-th.sortable.sort-asc::before {
-    opacity: 1;
-    color: var(--color-primary, var(--text-primary));
-}
-th.sortable.sort-asc::after {
-    opacity: 0.15;
-}
-
-th.sortable.sort-desc::after {
-    opacity: 1;
-    color: var(--color-primary, var(--text-primary));
-}
-th.sortable.sort-desc::before {
-    opacity: 0.15;
-}
-
-th.sortable:hover::before,
-th.sortable:hover::after {
+th.sortable:not(:has(.sort-arrows)):hover::after {
     opacity: 0.7;
 }
-th.sortable.sort-asc:hover::after,
-th.sortable.sort-desc:hover::before {
-    opacity: 0.4;
+th.sortable:not(:has(.sort-arrows)).sort-asc::after {
+    content: '\2191';
+    opacity: 1;
+    color: var(--color-primary, var(--text-primary));
+    font-weight: 700;
+}
+th.sortable:not(:has(.sort-arrows)).sort-desc::after {
+    content: '\2193';
+    opacity: 1;
+    color: var(--color-primary, var(--text-primary));
+    font-weight: 700;
 }
 
 td {

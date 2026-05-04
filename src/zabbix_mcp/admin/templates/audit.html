@@ -52,38 +52,32 @@
            hx-swap="innerHTML">
 </div>
 
-<!-- Audit Table -->
+<!-- Audit Table.
+     Sort headers run via JavaScript (audit-sort.js inline below) instead
+     of pre-baked hx-get URLs. The previous approach hard-coded the
+     "next order" toggle on every render, but htmx swaps only #audit-table
+     (the tbody), so after the first click the thead still reflects the
+     INITIAL sort_by / sort_order - the second click on a different
+     column then toggled against stale state and looked like "sort works
+     in only one direction" (reported 2026-05-04). New flow: thead
+     stores the active column / direction in data-* attrs, the click
+     handler computes the next direction live, fires the htmx request,
+     and the htmx:afterSwap hook reads the URL the request landed on
+     to refresh which arrow is highlighted. -->
 <div class="table-container">
     <table>
-        <thead>
+        <thead id="audit-thead" data-sort-by="{{ sort_by }}" data-sort-order="{{ sort_order }}">
             <tr>
-                {% set _next_order = 'asc' if (sort_by == 'timestamp' and sort_order == 'desc') else 'desc' %}
-                <th class="sortable {% if sort_by == 'timestamp' %}sort-{{ sort_order }}{% endif %}"
-                    hx-get="/audit?sort=timestamp&order={% if sort_by == 'timestamp' and sort_order == 'desc' %}asc{% else %}desc{% endif %}"
-                    hx-target="#audit-table" hx-swap="innerHTML"
-                    hx-include="[name='date_from'], [name='date_to'], [name='action'], [name='search']"
-                    style="cursor:pointer;">Timestamp</th>
-                <th class="sortable {% if sort_by == 'action' %}sort-{{ sort_order }}{% endif %}"
-                    hx-get="/audit?sort=action&order={% if sort_by == 'action' and sort_order == 'asc' %}desc{% else %}asc{% endif %}"
-                    hx-target="#audit-table" hx-swap="innerHTML"
-                    hx-include="[name='date_from'], [name='date_to'], [name='action'], [name='search']"
-                    style="cursor:pointer;">Action</th>
-                <th class="sortable {% if sort_by == 'user' %}sort-{{ sort_order }}{% endif %}"
-                    hx-get="/audit?sort=user&order={% if sort_by == 'user' and sort_order == 'asc' %}desc{% else %}asc{% endif %}"
-                    hx-target="#audit-table" hx-swap="innerHTML"
-                    hx-include="[name='date_from'], [name='date_to'], [name='action'], [name='search']"
-                    style="cursor:pointer;">User</th>
-                <th class="sortable {% if sort_by == 'target' %}sort-{{ sort_order }}{% endif %}"
-                    hx-get="/audit?sort=target&order={% if sort_by == 'target' and sort_order == 'asc' %}desc{% else %}asc{% endif %}"
-                    hx-target="#audit-table" hx-swap="innerHTML"
-                    hx-include="[name='date_from'], [name='date_to'], [name='action'], [name='search']"
-                    style="cursor:pointer;">Target</th>
+                {% macro sorthead(key, label) -%}
+                <th class="sortable {% if sort_by == key %}sort-{{ sort_order }}{% endif %}"
+                    data-sort-key="{{ key }}">{{ label }}<span class="sort-arrows"><span class="sort-arrow sort-arrow-up">&#x2191;</span><span class="sort-arrow sort-arrow-down">&#x2193;</span></span></th>
+                {%- endmacro %}
+                {{ sorthead('timestamp', 'Timestamp') }}
+                {{ sorthead('action', 'Action') }}
+                {{ sorthead('user', 'User') }}
+                {{ sorthead('target', 'Target') }}
                 <th>Details</th>
-                <th class="sortable {% if sort_by == 'ip' %}sort-{{ sort_order }}{% endif %}"
-                    hx-get="/audit?sort=ip&order={% if sort_by == 'ip' and sort_order == 'asc' %}desc{% else %}asc{% endif %}"
-                    hx-target="#audit-table" hx-swap="innerHTML"
-                    hx-include="[name='date_from'], [name='date_to'], [name='action'], [name='search']"
-                    style="cursor:pointer;">IP</th>
+                {{ sorthead('ip', 'IP') }}
             </tr>
         </thead>
         <tbody id="audit-table">
@@ -132,4 +126,70 @@
     </button>
 </div>
 {% endif %}
+
+<script>
+/* Audit log sort handler.
+ *
+ * Why custom JS instead of pre-baked hx-get on each <th>? htmx swaps
+ * only #audit-table (the tbody) on sort, so the thead - which holds
+ * the active class AND the hx-get toggle URL computed from sort_by /
+ * sort_order at full-page render time - kept stale state after the
+ * first click. The second click on a different column then toggled
+ * against that stale state and looked like "sort works in only one
+ * direction" (reported 2026-05-04).
+ *
+ * New flow: thead carries data-sort-by / data-sort-order; the click
+ * handler computes the next direction live from those, fires htmx
+ * manually, and updates the thead state in the same tick so the
+ * arrow lights up immediately. Filter inputs are pulled in fresh
+ * on every click via hx-include.
+ *
+ * Default direction on a NEW column: timestamp goes to desc (newest
+ * first - what the operator usually wants), text columns go to asc
+ * (alphabetical). Toggling the same column flips whatever it is now.
+ */
+(function() {
+    const thead = document.getElementById('audit-thead');
+    if (!thead) return;
+    const filterSelector = "[name='date_from'], [name='date_to'], [name='action'], [name='search']";
+
+    function dispatchSort(key) {
+        const currentBy = thead.dataset.sortBy;
+        const currentOrder = thead.dataset.sortOrder;
+        let nextOrder;
+        if (currentBy === key) {
+            nextOrder = (currentOrder === 'asc') ? 'desc' : 'asc';
+        } else {
+            nextOrder = (key === 'timestamp') ? 'desc' : 'asc';
+        }
+        const params = new URLSearchParams();
+        params.set('sort', key);
+        params.set('order', nextOrder);
+        document.querySelectorAll(filterSelector).forEach(function(input) {
+            if (input.value !== undefined && input.value !== '') {
+                params.set(input.name, input.value);
+            }
+        });
+        if (window.htmx) {
+            window.htmx.ajax('GET', '/audit?' + params.toString(), {
+                target: '#audit-table',
+                swap: 'innerHTML',
+            });
+        }
+        thead.dataset.sortBy = key;
+        thead.dataset.sortOrder = nextOrder;
+        thead.querySelectorAll('th.sortable').forEach(function(t) {
+            t.classList.remove('sort-asc', 'sort-desc');
+        });
+        const activeTh = thead.querySelector('th[data-sort-key="' + key + '"]');
+        if (activeTh) activeTh.classList.add('sort-' + nextOrder);
+    }
+
+    thead.querySelectorAll('th.sortable[data-sort-key]').forEach(function(th) {
+        th.addEventListener('click', function() {
+            dispatchSort(th.dataset.sortKey);
+        });
+    });
+})();
+</script>
 {% endblock %}

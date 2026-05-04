@@ -445,9 +445,15 @@
     }
     document.addEventListener('click', function(e) {
         var th = e.target.closest && e.target.closest('th.sortable');
-        // Skip when the header carries hx-get - that's the audit log,
-        // server-side sort is already wired up via htmx.
-        if (th && !th.hasAttribute('hx-get')) {
+        // Skip when the header carries hx-get (server-side sort wired
+        // up via htmx) OR when it carries data-sort-key (audit log,
+        // which uses a custom JS handler that talks htmx itself).
+        // Without the data-sort-key skip, the audit log got two
+        // toggles per click - the custom handler sets sort-asc and
+        // then this delegated one flipped it back to sort-desc -
+        // causing the "sort works only one direction" symptom
+        // reported 2026-05-04.
+        if (th && !th.hasAttribute('hx-get') && !th.hasAttribute('data-sort-key')) {
             _zmcpSortTable(th);
         }
     });
