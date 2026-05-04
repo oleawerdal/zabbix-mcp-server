@@ -67,6 +67,16 @@
   .wiz-card-title {
     font-weight: 600; font-size: 1.05rem; color: var(--text-primary);
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    /* Long unbroken token names (operator can paste 100+ chars
+       through duplicate-from) blew past the card's right border
+       without word-break - reported 2026-05-04. overflow-wrap
+       breaks the long word at any character so the title stays
+       inside the card. min-width:0 lets the flex item shrink
+       below its content's intrinsic min-width. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    min-width: 0;
+    max-width: 100%;
   }
   .wiz-card-meta {
     font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted);
