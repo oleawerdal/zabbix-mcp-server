@@ -1251,19 +1251,14 @@ table.tokens-list td.col-actions .btn-sm {
     box-shadow: 0 0 0 3px var(--color-primary-light);
 }
 
-/* Disabled toggle (read-only state indicator) - keeps the slider in
-   the checked/unchecked position but renders the track in muted grey
-   instead of brand primary so the operator immediately reads it as
-   "current state, not editable from this UI". Used for things that
-   would foot-gun the operator if changed from inside the portal,
-   e.g. [admin].enabled. */
+/* Disabled toggle (read-only state indicator) - swap the brand-primary
+   "on" track for muted grey and switch the cursor; nothing else changes
+   so the slider stays in its checked/unchecked position with full opacity.
+   Used for things that would foot-gun the operator if changed from inside
+   the portal, e.g. [admin].enabled. */
 .toggle input:disabled + .toggle-slider {
     background: var(--color-text-muted);
-    opacity: 0.55;
     cursor: not-allowed;
-}
-.toggle input:checked:disabled + .toggle-slider {
-    background: var(--color-text-muted);
 }
 
 .toggle-label {
@@ -1274,7 +1269,6 @@ table.tokens-list td.col-actions .btn-sm {
 }
 .toggle-label:has(input:disabled) {
     cursor: not-allowed;
-    opacity: 0.85;
 }
 
 /* ---------- Toast Notifications ---------- */
