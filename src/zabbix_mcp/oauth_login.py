@@ -125,7 +125,76 @@ def _verify_admin_user(config: Any, username: str, password: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Login endpoint
+# Scope catalog for the consent screen
+# ---------------------------------------------------------------------------
+
+
+_SCOPE_LABELS: dict[str, tuple[str, str]] = {
+    "*":              ("Full access (all tools)", "Lets the client invoke every tool on every server, including write operations like host_create / host_delete / action_prepare."),
+    "monitoring":     ("Monitoring", "Read live state: hosts, host groups, items, triggers, problems, history, graphs, discovery rules."),
+    "data_collection":("Data collection / templates", "Read templates, value maps, dashboards. Required for clients that explore configuration."),
+    "alerts":         ("Alerts & actions", "Read action definitions, alert history, media types, scripts."),
+    "users":          ("Users & roles", "Read or modify Zabbix user accounts, groups, roles, MFA. High-privilege - decline unless the client really needs it."),
+    "administration": ("Administration", "Read or modify housekeeping, proxies, audit log, maintenance windows, server settings. High-privilege."),
+    "extensions":     ("Extension tools", "Run server-side analytics: graph_render, anomaly_detect, capacity_forecast, problem_active_get, report_generate, health_check."),
+}
+
+
+def _scopes_for_consent_ui(requested: list[str]) -> list[dict[str, Any]]:
+    """Translate the client's requested scope list into checkbox rows.
+
+    Each row gets a human label, a description, and a tool-count badge
+    so the operator can decide row-by-row what to grant.  Wildcard
+    ``*`` is rendered with a warning frame to flag the unlimited scope.
+    """
+    from zabbix_mcp.config import TOOL_GROUPS, _expand_tool_groups
+    try:
+        from zabbix_mcp.api import ALL_METHODS
+        all_method_count = len(ALL_METHODS)
+    except Exception:
+        all_method_count = 0
+
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    # If client did not list any scopes, fall back to "*" so the operator
+    # has something to consent to (matches the existing default-grant
+    # behaviour).
+    items = list(requested) or ["*"]
+    for sid in items:
+        if sid in seen:
+            continue
+        seen.add(sid)
+        label, desc = _SCOPE_LABELS.get(sid, (sid, "Custom scope - covers a single tool prefix."))
+        # Tool count: count ALL_METHODS rows whose tool_name prefix is in the
+        # expanded group, plus any extension tools listed by name.
+        if sid == "*":
+            count = all_method_count + len(TOOL_GROUPS.get("extensions", []))
+        else:
+            try:
+                expanded = set(_expand_tool_groups([sid]))
+                count = sum(
+                    1 for m in (
+                        __import__("zabbix_mcp.api", fromlist=["ALL_METHODS"]).ALL_METHODS
+                    )
+                    if (m.tool_name.rsplit("_", 1)[0] if "_" in m.tool_name else m.tool_name) in expanded
+                )
+                # Add named extension tools if scope expands to them
+                ext_tools = set(TOOL_GROUPS.get("extensions", []))
+                count += sum(1 for t in ext_tools if t in expanded)
+            except Exception:
+                count = 0
+        rows.append({
+            "id": sid,
+            "label": label,
+            "description": desc,
+            "tool_count": count,
+            "checked": True,
+        })
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Login + consent endpoint
 # ---------------------------------------------------------------------------
 
 
@@ -134,47 +203,34 @@ async def handle_oauth_login(
     provider: Any,
     config: Any,
 ) -> Response:
-    """Route handler for ``GET /oauth/login`` and ``POST /oauth/login``.
+    """Route handler for the two-step OAuth interactive flow.
 
-    GET: render the login form, populated from the pending authorize
-    request identified by ``?request_id=...``.
+    Step 1 (login):
+        ``GET /oauth/login?request_id=...``  -> render the login form.
+        ``POST /oauth/login`` (no ``step`` field) -> verify credentials,
+        if OK render the consent screen; on failure re-render the
+        login form with an error.
 
-    POST: verify credentials, complete the pending authorize request,
-    redirect the browser to the OAuth client's redirect_uri carrying
-    ``code`` and ``state``.  On bad credentials, re-render the form
-    with an error.
+    Step 2 (consent):
+        ``POST /oauth/login`` (``step=consent`` + ``action=allow|deny``
+        + ``scope=...`` checkboxes) -> finalise the authorization with
+        only the scopes the operator ticked, redirect the browser back
+        to the client's redirect_uri carrying ``code`` and ``state``.
+        On Deny, redirect with ``error=access_denied``.
     """
     if request.method == "GET":
-        request_id = request.query_params.get("request_id", "")
-        pending = provider._pending.get(request_id)
-        if pending is None:
-            return _render_error_page(
-                "This authorization request has expired or was never started. "
-                "Reconnect from your MCP client to begin a new login.",
-            )
-        client_name = (pending.client.client_name or "").strip() or str(pending.client.client_id or "")
-        return HTMLResponse(_render_template(
-            "oauth_login.html",
-            request_id=request_id,
-            client_name=client_name,
-            scopes=list(pending.params.scopes or []),
-            error=None,
-            username="",
-        ))
+        return _render_login_form(provider, request)
 
-    # POST
     form = await request.form()
     request_id = str(form.get("request_id", "") or "")
-    username = str(form.get("username", "") or "").strip()
-    password = str(form.get("password", "") or "")
+    step = str(form.get("step", "") or "")
 
-    # Brute-force throttle by client IP (parity with admin /login).
-    # Read the IP from the contextvar set by _client_ip_middleware so
-    # an X-Forwarded-For from a trusted proxy is honoured upstream.
     from zabbix_mcp.token_store import current_client_ip
     client_ip = current_client_ip.get() or (
         request.client.host if request.client else "unknown"
     )
+
+    # Brute-force throttle covers the credential-verify step only.
     if not _oauth_login_limiter.check(client_ip):
         return _render_error_page(
             "Too many failed login attempts. Wait 5 minutes before trying again.",
@@ -184,8 +240,6 @@ async def handle_oauth_login(
     import time as _time
     pending = provider._pending.get(request_id)
     if pending is None or pending.expires_at < _time.time():
-        # Drop expired pending entries so brute-force attempts on stale
-        # request_ids do not pin them in memory.
         if pending is not None:
             provider._pending.pop(request_id, None)
         return _render_error_page(
@@ -193,7 +247,45 @@ async def handle_oauth_login(
             "MCP client to begin a new login.",
         )
 
+    if step == "consent":
+        return _handle_consent_step(provider, pending, request_id, form, client_ip)
+    return _handle_login_step(
+        provider, pending, request_id, form, client_ip, config,
+    )
+
+
+def _render_login_form(provider: Any, request: Request) -> Response:
+    request_id = request.query_params.get("request_id", "")
+    pending = provider._pending.get(request_id)
+    if pending is None:
+        return _render_error_page(
+            "This authorization request has expired or was never started. "
+            "Reconnect from your MCP client to begin a new login.",
+        )
+    client_name = (pending.client.client_name or "").strip() or str(pending.client.client_id or "")
+    return HTMLResponse(_render_template(
+        "oauth_login.html",
+        request_id=request_id,
+        client_name=client_name,
+        scopes=list(pending.params.scopes or []),
+        error=None,
+        username="",
+    ))
+
+
+def _handle_login_step(
+    provider: Any,
+    pending: Any,
+    request_id: str,
+    form: Any,
+    client_ip: str,
+    config: Any,
+) -> Response:
+    """Step 1: credential verification -> render consent screen on success."""
     from zabbix_mcp.admin.audit_writer import write_audit
+
+    username = str(form.get("username", "") or "").strip()
+    password = str(form.get("password", "") or "")
 
     if not _verify_admin_user(config, username, password):
         _oauth_login_limiter.record_attempt(client_ip)
@@ -214,29 +306,126 @@ async def handle_oauth_login(
             error="Invalid username or password.",
             username=username,
         ), status_code=401)
-    _oauth_login_limiter.reset(client_ip)
 
-    granted_scopes = list(pending.params.scopes or [])
-    redirect_url = provider.complete_pending(
-        request_id, granted_scopes, subject=username,
-    )
-    if redirect_url is None:
-        return _render_error_page(
-            "This authorization request has expired between submission and "
-            "completion. Reconnect from your MCP client to begin a new login.",
-        )
+    _oauth_login_limiter.reset(client_ip)
+    pending.authenticated_subject = username
     write_audit(
         action="oauth.login_success",
         user=username,
         target_type="oauth_client",
         target_id=str(pending.client.client_id or ""),
-        details={"client_name": pending.client.client_name or "", "scopes": granted_scopes},
+        details={"client_name": pending.client.client_name or "", "stage": "credentials_verified"},
+        ip=client_ip or "",
+    )
+
+    requested_scopes = list(pending.params.scopes or [])
+    has_wildcard = (not requested_scopes) or ("*" in requested_scopes)
+    return HTMLResponse(_render_template(
+        "oauth_consent.html",
+        request_id=request_id,
+        client_name=(pending.client.client_name or "").strip() or str(pending.client.client_id or ""),
+        subject=username,
+        scopes=_scopes_for_consent_ui(requested_scopes),
+        has_wildcard_request=has_wildcard,
+    ))
+
+
+def _handle_consent_step(
+    provider: Any,
+    pending: Any,
+    request_id: str,
+    form: Any,
+    client_ip: str,
+) -> Response:
+    """Step 2: operator clicked Allow / Deny on the consent screen."""
+    from zabbix_mcp.admin.audit_writer import write_audit
+
+    if pending.authenticated_subject is None:
+        # Cannot reach the consent screen without first authenticating.
+        # If we got here without a subject something tampered with the
+        # form - treat as a failed attempt.
+        _oauth_login_limiter.record_attempt(client_ip)
+        return _render_error_page(
+            "Authentication required. Reconnect from your MCP client to "
+            "begin a new login.",
+        )
+
+    action = str(form.get("action", "") or "").lower()
+    subject = pending.authenticated_subject
+
+    if action == "deny":
+        write_audit(
+            action="oauth.consent_denied",
+            user=subject,
+            target_type="oauth_client",
+            target_id=str(pending.client.client_id or ""),
+            details={"client_name": pending.client.client_name or ""},
+            ip=client_ip or "",
+        )
+        # Drop the pending entry and redirect the browser back to the
+        # client with the standard OAuth 2.1 access_denied error.
+        provider._pending.pop(request_id, None)
+        from urllib.parse import urlencode
+        params = {"error": "access_denied", "error_description": "Operator declined the consent prompt"}
+        if pending.params.state:
+            params["state"] = pending.params.state
+        sep = "&" if "?" in str(pending.params.redirect_uri) else "?"
+        return RedirectResponse(
+            f"{pending.params.redirect_uri}{sep}{urlencode(params)}",
+            status_code=302,
+        )
+
+    if action != "allow":
+        return _render_error_page("Unrecognised consent action.")
+
+    granted = [str(s) for s in form.getlist("scope")] if hasattr(form, "getlist") else []
+    if not granted:
+        # The operator unticked everything -- treat as a deny since an
+        # empty grant is functionally useless and likely an accident.
+        return _render_error_page(
+            "You did not grant any scope. Either pick at least one scope "
+            "or click Deny to cancel.",
+            status_code=400,
+        )
+
+    requested_scopes = set(pending.params.scopes or [])
+    if "*" in requested_scopes or not requested_scopes:
+        requested_scopes |= {"*"}
+        # When client requested wildcard, any scope set is allowed
+        allowed_grant = granted
+    else:
+        # Reject any scope the client did not originally request
+        allowed_grant = [s for s in granted if s in requested_scopes]
+        if not allowed_grant:
+            return _render_error_page(
+                "Granted scopes do not match what the client requested.",
+                status_code=400,
+            )
+
+    redirect_url = provider.complete_pending(
+        request_id, allowed_grant, subject=subject,
+    )
+    if redirect_url is None:
+        return _render_error_page(
+            "This authorization request has expired between submission "
+            "and completion. Reconnect from your MCP client to begin a "
+            "new login.",
+        )
+    write_audit(
+        action="oauth.consent_granted",
+        user=subject,
+        target_type="oauth_client",
+        target_id=str(pending.client.client_id or ""),
+        details={
+            "client_name": pending.client.client_name or "",
+            "requested_scopes": list(pending.params.scopes or []),
+            "granted_scopes": allowed_grant,
+        },
         ip=client_ip or "",
     )
     logger.info(
-        "OAuth login granted: user=%s client=%s scopes=%s",
-        username,
-        pending.client.client_id,
-        granted_scopes,
+        "OAuth consent granted: user=%s client=%s requested=%s granted=%s",
+        subject, pending.client.client_id,
+        list(pending.params.scopes or []), allowed_grant,
     )
     return RedirectResponse(redirect_url, status_code=302)

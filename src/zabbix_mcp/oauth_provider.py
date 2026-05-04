@@ -111,17 +111,30 @@ class _PendingAuthorization:
     The framework's authorize handler hands us validated AuthorizationParams
     and the resolved client; we stash them keyed by an opaque ``request_id``
     and return a redirect to our login page that carries that request_id.
-    The login completion handler later calls ``complete_pending`` with the
-    same request_id to mint the actual authorization code and redirect
-    the user-agent back to the client's redirect_uri.
+
+    Lifecycle states (tracked via ``authenticated_subject``):
+
+    - **Fresh** -- created by ``authorize()``; ``authenticated_subject`` is
+      ``None``. The user-agent has been redirected to ``/oauth/login``.
+    - **Authenticated, awaiting consent** -- the operator typed valid
+      credentials; ``authenticated_subject`` is set to their username.
+      The browser is on the consent screen which lists the scopes / tools
+      the client is asking for.
+    - **Completed** -- ``complete_pending`` consumed the entry, minted an
+      authorization code, and 302'd the browser back to the client.
+
+    The two-step (login -> consent) shape is what users expect from
+    OAuth: at no point does the operator hand the keys over without
+    seeing what the third-party client will be allowed to do.
     """
 
-    __slots__ = ("client", "params", "expires_at")
+    __slots__ = ("client", "params", "expires_at", "authenticated_subject")
 
     def __init__(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> None:
         self.client = client
         self.params = params
         self.expires_at = time.time() + _AUTH_CODE_TTL_SECONDS
+        self.authenticated_subject: str | None = None
 
 
 class ZmcpOAuthProvider:

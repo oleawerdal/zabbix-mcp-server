@@ -130,9 +130,12 @@ def _http_post_json(url: str, body: dict, headers: dict | None = None) -> tuple[
         return exc.code, _json_load(exc.read()), dict(exc.headers)
 
 
-def _http_post_form(url: str, body: dict, headers: dict | None = None, follow: bool = False):
+def _http_post_form(url: str, body, headers: dict | None = None, follow: bool = False):
+    """``body`` may be a dict or a list of (key, value) tuples to allow
+    repeated keys (e.g. multiple ``scope`` checkboxes on the consent
+    form)."""
     import urllib.parse
-    data = urllib.parse.urlencode(body).encode()
+    data = urllib.parse.urlencode(body, doseq=True).encode()
     req = urllib.request.Request(
         url, data=data, method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded", **(headers or {})},
@@ -323,10 +326,25 @@ verify_ssl = false
         self.assertIn("/oauth/login?request_id=", login_url)
         request_id = parse_qs(urlparse(login_url).query)["request_id"][0]
 
-        # 7. POST /oauth/login -> 302 to client redirect_uri with code
-        status, _body, headers = _http_post_form(
+        # 7a. POST /oauth/login (credentials) -> 200 + consent screen.
+        status, body, _ = _http_post_form(
             f"{self.base}/oauth/login",
             {"request_id": request_id, "username": self.test_user, "password": self.test_pass},
+        )
+        self.assertEqual(status, 200, f"login step failed: {body[:200]!r}")
+        self.assertIn("Allow access?", body)
+        self.assertIn(self.test_user, body)  # subject is shown to operator
+
+        # 7b. POST /oauth/login (consent allow + scope checkboxes) ->
+        # 302 to client redirect_uri with code.
+        status, _body, headers = _http_post_form(
+            f"{self.base}/oauth/login",
+            [
+                ("request_id", request_id),
+                ("step", "consent"),
+                ("action", "allow"),
+                ("scope", "*"),
+            ],
         )
         self.assertEqual(status, 302)
         callback_url = headers.get("location") or headers.get("Location")
