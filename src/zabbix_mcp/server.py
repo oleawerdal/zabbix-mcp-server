@@ -2879,6 +2879,7 @@ def run_server(
                     config_path=config_path,
                     client_manager=client_manager,
                     token_store=token_store,
+                    oauth_provider=oauth_provider,
                 )
 
                 # Run admin on a separate thread with its own uvicorn

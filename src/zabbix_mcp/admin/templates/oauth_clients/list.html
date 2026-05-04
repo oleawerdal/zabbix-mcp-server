@@ -1,0 +1,125 @@
+{#
+  Zabbix MCP Server
+  Copyright (C) 2026 initMAX s.r.o.
+  Licensed under the GNU Affero General Public License v3.
+  See LICENSE for details.
+#}
+{% extends "base.html" %}
+{% block title %}OAuth Clients{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">OAuth Clients</h1>
+        <p class="page-subtitle">Third-party MCP clients (ChatGPT custom apps, Claude Desktop, MCP Inspector, ...) that registered themselves against the embedded OAuth 2.1 authorization server.</p>
+    </div>
+</div>
+
+{% if not oauth_enabled %}
+<div class="card">
+    <h3 class="card-title">OAuth is not enabled</h3>
+    <p class="text-muted" style="margin-top: 8px;">
+        OAuth dynamic client registration is off in <code>config.toml</code>. To accept OAuth-discovering clients (ChatGPT, Claude Desktop), set <code>[oauth].enabled = true</code> and <code>[server].public_url</code> to your externally-reachable HTTPS URL, then restart the server.
+    </p>
+    <p class="text-muted" style="margin-top: 8px;">
+        Full setup walkthrough in <a href="https://github.com/initMAX/zabbix-mcp-server/blob/main/docs/OAUTH.md" target="_blank">docs/OAUTH.md</a>.
+    </p>
+</div>
+{% else %}
+
+<div class="card" style="margin-bottom: 16px;">
+    <h3 class="card-title">Discovery</h3>
+    <div class="text-sm text-muted">
+        Clients auto-discover this server's OAuth endpoints via the well-known URLs. If a client cannot reach these, it cannot register or authenticate.
+    </div>
+    <table class="data-table" style="margin-top: 10px;">
+        <tbody>
+            <tr>
+                <td style="width: 250px;"><strong>Authorization server metadata</strong></td>
+                <td><code>{{ public_url }}/.well-known/oauth-authorization-server</code></td>
+            </tr>
+            <tr>
+                <td><strong>Protected resource metadata</strong></td>
+                <td><code>{{ public_url }}/.well-known/oauth-protected-resource</code></td>
+            </tr>
+            <tr>
+                <td><strong>Dynamic registration (RFC 7591)</strong></td>
+                <td><code>POST {{ public_url }}/register</code></td>
+            </tr>
+            <tr>
+                <td><strong>Authorize / token / revoke</strong></td>
+                <td><code>{{ public_url }}/authorize</code> &middot; <code>{{ public_url }}/token</code> &middot; <code>{{ public_url }}/revoke</code></td>
+            </tr>
+            <tr>
+                <td><strong>Operator login</strong></td>
+                <td><code>{{ public_url }}/oauth/login</code> (Zabbix MCP admin-portal users)</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3 class="card-title">Registered clients ({{ clients | length }})</h3>
+
+    {% if not clients %}
+    <p class="text-muted" style="margin-top: 8px;">
+        No clients have registered yet. The first ChatGPT custom app or Claude Desktop remote connector that points at this server will appear here automatically once it completes <code>POST /register</code>.
+    </p>
+    {% else %}
+    <div class="table-container">
+        <table class="data-table" style="margin-top: 10px;">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Client ID</th>
+                    <th>Redirect URIs</th>
+                    <th>Auth method</th>
+                    <th>Active tokens</th>
+                    <th>Registered</th>
+                    {% if can_revoke %}<th>Actions</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in clients %}
+                <tr>
+                    <td>
+                        <a href="/oauth-clients/{{ c.id | urlencode }}" style="font-weight: 600;">{{ c.name }}</a>
+                    </td>
+                    <td>
+                        <code class="text-sm" style="word-break: break-all;">{{ c.id }}</code>
+                    </td>
+                    <td>
+                        {% for uri in c.redirect_uris %}
+                            <div class="text-sm" style="word-break: break-all;">{{ uri }}</div>
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% if c.token_endpoint_auth_method == "none" %}
+                            <span class="badge badge-muted">public (PKCE)</span>
+                        {% else %}
+                            <span class="badge badge-muted">{{ c.token_endpoint_auth_method }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-success" title="Currently issued, not yet expired">{{ c.active_access_tokens }} access</span>
+                        <span class="badge badge-muted" title="Refresh tokens still valid">{{ c.active_refresh_tokens }} refresh</span>
+                    </td>
+                    <td class="text-sm text-muted">{{ c.issued_human }}</td>
+                    {% if can_revoke %}
+                    <td>
+                        <form method="post" action="/oauth-clients/{{ c.id | urlencode }}/revoke" style="display:inline;" onsubmit="return confirm('Revoke OAuth client &quot;{{ c.name }}&quot;? This deletes the registration AND invalidates every access/refresh token it currently holds.');">
+                            {{ csrf_input | safe }}
+                            <button type="submit" class="btn btn-sm btn-danger">Revoke</button>
+                        </form>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}

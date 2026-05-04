@@ -305,11 +305,18 @@ class AdminApp:
         config_path: str,
         client_manager: ClientManager,
         token_store: TokenStore,
+        oauth_provider: object | None = None,
     ) -> None:
         self.config = config
         self.config_path = config_path
         self.client_manager = client_manager
         self.token_store = token_store
+        # Optional reference to the in-process OAuth 2.1 provider so the
+        # admin UI can list / revoke registered clients and see live
+        # access-token / refresh-token counts.  ``None`` when [oauth] is
+        # disabled - the OAuth Clients page handles that by showing an
+        # informational empty state instead of failing.
+        self.oauth_provider = oauth_provider
 
         # Session management
         import secrets
@@ -421,6 +428,9 @@ class AdminApp:
         from zabbix_mcp.admin.views.uploads import upload_logo, upload_tls_cert, upload_tls_key
         from zabbix_mcp.admin.views.audit import audit_view, audit_export
         from zabbix_mcp.admin.views.wizard import wizard_view
+        from zabbix_mcp.admin.views.oauth_clients import (
+            oauth_clients_list, oauth_client_detail, oauth_client_revoke,
+        )
 
         routes = [
             Route("/health", self._admin_health, methods=["GET"]),
@@ -464,6 +474,9 @@ class AdminApp:
             Route("/settings/{section}", settings_update, methods=["POST"]),
             Route("/audit", audit_view),
             Route("/audit/export", audit_export),
+            Route("/oauth-clients", oauth_clients_list, methods=["GET"]),
+            Route("/oauth-clients/{client_id}", oauth_client_detail, methods=["GET"]),
+            Route("/oauth-clients/{client_id}/revoke", oauth_client_revoke, methods=["POST"]),
             Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static"),
         ]
 
