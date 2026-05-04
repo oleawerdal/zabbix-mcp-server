@@ -13,10 +13,19 @@ External-feedback release. After v1.29 went out, two pieces of feedback surfaced
   - `item_history_summary_get` - item metadata + history window + min/max/avg over the period. Accepts `itemid` or `(host, key)`, `period` (default `"1h"`), `limit` (default 100).
   - All four reuse the existing `_filter_active_problems` helper so they stay consistent with `problem_active_get`. Each is registered in `monitoring` and `extensions` so monitoring-only tokens see them after the per-token tools/list filter.
 - **`./deploy/install.sh request-tls` subcommand** automates Let's Encrypt issuance when the MCP server terminates TLS itself (discussion #27). Wraps `certbot certonly` (auto-detects standalone vs webroot based on whether anything is bound to :80 already), symlinks `fullchain.pem` / `privkey.pem` into `/etc/zabbix-mcp/tls/`, idempotently writes `[server].tls_cert_file` and `[server].tls_key_file` into `config.toml`, installs a deploy hook at `/etc/letsencrypt/renewal-hooks/deploy/zabbix-mcp-server.sh` so post-renewal the service auto-reloads, and enables `certbot.timer`. Re-runnable any time you rotate or add a hostname. Usage: `sudo ./deploy/install.sh request-tls --hostname mcp.example.com --email you@example.com`.
+- **"Check now" button** on the admin portal header next to the version pill, wired to a new `/api/check-updates` endpoint that calls `force_check()` on the update checker. Forces a fresh GitHub release poll bypassing the 60-second throttle - useful right after an upgrade to confirm the new version registered without having to wait the cache out.
+
+### Fixed
+
+- **Update notification throttle was too aggressive** - 30 minutes between login-triggered GitHub polls meant an operator who upgraded right after a release saw a cached "no update" answer for half an hour. Reduced to 60 seconds, which still absorbs reload loops and double-login bursts but stays well inside the public GitHub rate limit (60 req/h/IP).
+- **README mis-described the update check** as a hourly daemon thread; the daemon was removed in v1.24 in favour of login-triggered polling. Documentation now matches the real three triggers (boot, every successful login, manual "Check now").
 
 ### Documentation
 
 - `docs/OAUTH.md` gains a "Let's Encrypt one-liner" callout in the TLS section pointing at the new installer subcommand.
+- README.md TOC restructured. Added OAuth 2.1, Public URL, First-time admin access, Update notifications. New top-level **Operate** section bundles Installer CLI + Updates + Compatibility + Development + Related Projects + License. Tools count badge and "default" tools count corrected (231 -> 235 with the new pre-correlated views and `problem_active_get`).
+- README.md gains a dedicated **OAuth 2.1 Authorization Server** section with quick-start config and feature breakdown (discovery, PKCE, two-step consent + role cap, refresh-token reuse detection, per-client IP allowlist + TTL, audit integration, legacy bearer coexist) so the flagship v1.28-v1.29 capability is no longer buried inside the configuration table.
+- README.md and INSTALL.md TLS / HTTPS section restructured into "two production paths" (reverse proxy vs native TLS via `request-tls` one-liner) with explicit note that this is a general HTTPS feature - works with OAuth, bearer tokens, or no auth.
 
 ## v1.29 - 2026-05-04
 

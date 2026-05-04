@@ -437,6 +437,7 @@ class AdminApp:
             Route("/health", self._admin_health, methods=["GET"]),
             Route("/api/mcp-status", self._mcp_status, methods=["GET"]),
             Route("/api/server-status", self._server_status, methods=["GET"]),
+            Route("/api/check-updates", self._check_updates, methods=["POST"]),
             Route("/login", self._login, methods=["GET", "POST"]),
             Route("/logout", self._logout, methods=["POST"]),
             Route("/", dashboard),
@@ -643,6 +644,27 @@ class AdminApp:
             except Exception as e:
                 results[name] = {"status": "error", "error": str(e)[:100]}
         return JSONResponse(results)
+
+    async def _check_updates(self, request: Request) -> Response:
+        """Force a fresh GitHub release poll, bypassing the throttle.
+
+        Wired to the "Check now" button on the admin portal header.
+        Any logged-in user may trigger it - the GitHub API is public
+        and the result is the same for every operator. CSRF check is
+        enforced by ``_CsrfMiddleware`` since this is a POST.
+        """
+        session = self._get_session(request)
+        if not session:
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        try:
+            from zabbix_mcp.admin.update_check import get_checker
+        except Exception as exc:
+            return JSONResponse({"ok": False, "reason": "import_failed", "error": str(exc)[:200]}, status_code=500)
+        # Run the synchronous force-check on a worker thread so the
+        # event loop is not blocked for HTTP_TIMEOUT_SECONDS.
+        import asyncio
+        result = await asyncio.to_thread(get_checker().force_check)
+        return JSONResponse(result)
 
     async def _login(self, request: Request) -> Response:
         """Handle login GET (form) and POST (submit)."""

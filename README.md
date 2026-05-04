@@ -19,7 +19,7 @@
     <a href="https://github.com/initMAX/zabbix-mcp-server/releases"><img alt="Version" src="https://img.shields.io/github/v/release/initMAX/zabbix-mcp-server?color=%231f65f4&label=version"></a>&nbsp;
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>&nbsp;
     <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-blue">&nbsp;
-    <img alt="Tools" src="https://img.shields.io/badge/tools-231-green">&nbsp;
+    <img alt="Tools" src="https://img.shields.io/badge/tools-235-green">&nbsp;
     <img alt="Zabbix" src="https://img.shields.io/badge/zabbix-5.0%E2%80%948.0-red">&nbsp;
     <a href="https://safeskill.dev/scan/initmax-zabbix-mcp-server"><img alt="SafeSkill" src="https://img.shields.io/badge/SafeSkill-100%2F100_Verified%20Safe-brightgreen"></a>
 </div>
@@ -30,10 +30,10 @@
 
 <p align="center">
   <b>Overview:</b> <a href="#what-is-this">What is this?</a> · <a href="#features">Features</a><br>
-  <b>Install:</b> <a href="#quick-start">Quick Start</a> · <a href="#installation">Installation</a> · <a href="#upgrade">Upgrade</a> · <a href="#installer-cli">Installer CLI</a><br>
-  <b>Configure:</b> <a href="#configuration-reference">Reference</a> · <a href="#tls--https">TLS / HTTPS</a> · <a href="#token-budget">Token Budget</a><br>
+  <b>Install:</b> <a href="#quick-start">Quick Start</a> · <a href="#installation">Installation</a> · <a href="#upgrade">Upgrade</a> · <a href="#first-time-admin-portal-access">First-time admin access</a><br>
+  <b>Configure:</b> <a href="#configuration-reference">Reference</a> · <a href="#oauth-21-authorization-server">OAuth 2.1</a> · <a href="#public-url-and-reverse-proxy-deployments">Public URL</a> · <a href="#tls--https">TLS / HTTPS</a> · <a href="#token-budget">Token Budget</a><br>
   <b>Use:</b> <a href="#client-mcp-wizard-beta">Client Wizard</a> · <a href="#connecting-ai-clients">AI Clients</a> · <a href="#example-prompts">Prompts</a> · <a href="#available-tools">Tools</a> · <a href="#common-parameters-get-methods">Parameters</a> · <a href="#pdf-reports-beta">PDF Reports</a><br>
-  <b>More:</b> <a href="#zabbix-compatibility">Compatibility</a> · <a href="#development">Development</a> · <a href="#related-projects">Related Projects</a> · <a href="#license">License</a> · <a href="#about-initmax">About initMAX</a>
+  <b>Operate:</b> <a href="#installer-cli">Installer CLI</a> · <a href="#update-notifications">Update notifications</a> · <a href="#zabbix-compatibility">Compatibility</a> · <a href="#development">Development</a> · <a href="#related-projects">Related Projects</a> · <a href="#license">License</a>
 </p>
 
 <br>
@@ -46,8 +46,8 @@ The server runs as a standalone HTTP service. AI clients connect to it over the 
 
 ## Features
 
-- **Complete API coverage** - All 58 Zabbix API groups (231 tools): hosts, problems, triggers, templates, users, dashboards, and more
-- **Extension tools** - `graph_render` (PNG export), `anomaly_detect` (z-score analysis), `capacity_forecast` (linear regression), `item_threshold_search` (filter items by `lastvalue` thresholds), `report_generate` (PDF reports), `action_prepare`/`action_confirm` (two-step write approval)
+- **Complete API coverage** - All 58 Zabbix API groups (223 tools): hosts, problems, triggers, templates, users, dashboards, and more
+- **Extension tools** (12) - **Pre-correlated views**: `host_status_get`, `hostgroup_overview_get`, `infrastructure_summary_get`, `item_history_summary_get`, `problem_active_get` (fold 3-5 raw API calls into one round-trip). Plus `graph_render` (PNG export), `anomaly_detect` (z-score analysis), `capacity_forecast` (linear regression), `item_threshold_search` (filter items by `lastvalue` thresholds), `report_generate` (PDF reports), `action_prepare`/`action_confirm` (two-step write approval).
 - **Admin web portal** - Full web UI on port 9090 for managing tokens, users, servers, templates, settings, and audit log; dark/light mode; point-and-click **Client MCP Wizard (beta)** that generates copy-paste-ready config snippets for 14 AI clients (Claude, Codex, Cursor, Cline, VS Code, JetBrains, Goose, Open WebUI, 5ire, Gemini CLI, n8n, ...)
 - **Multi-token authentication** - Named tokens with scopes, IP restrictions, server binding, expiry; managed via admin portal, CLI (`generate-token`), or config.toml
 - **Multi-server support** - Connect to multiple Zabbix instances (production, staging, ...) with separate tokens
@@ -955,7 +955,7 @@ All available options with detailed descriptions are in [`config.example.toml`](
 <tr><td><code>log_file</code></td><td>Path to log file (parent directory must exist)</td></tr>
 <tr><td><code>auth_token</code></td><td>Bearer token for HTTP/SSE authentication (supports <code>${ENV_VAR}</code>)</td></tr>
 <tr><td><code>rate_limit</code></td><td>Max Zabbix API calls per minute per client (default: <code>300</code>, set to <code>0</code> to disable)</td></tr>
-<tr><td><code>tools</code></td><td>Filter exposed tools by category or prefix — e.g. <code>["monitoring", "alerts"]</code> (default: all ~231 tools)</td></tr>
+<tr><td><code>tools</code></td><td>Filter exposed tools by category or prefix — e.g. <code>["monitoring", "alerts"]</code> (default: all 235 tools)</td></tr>
 <tr><td><code>disabled_tools</code></td><td>Denylist counterpart to <code>tools</code> — exclude specific tool groups or prefixes</td></tr>
 <tr><td><code>tls_cert_file</code> / <code>tls_key_file</code></td><td>Enable native HTTPS — paths to TLS certificate and private key (see <a href="#tls--https">TLS / HTTPS</a> below)</td></tr>
 <tr><td><code>cors_origins</code></td><td>List of allowed CORS origins (default: disabled)</td></tr>
@@ -970,16 +970,50 @@ All available options with detailed descriptions are in [`config.example.toml`](
 <tr><td><code>skip_version_check</code></td><td>Skip zabbix-utils version compatibility check (default: <code>false</code>)</td></tr>
 </table>
 
+## OAuth 2.1 Authorization Server
+
+Since v1.28 the server ships an embedded OAuth 2.1 authorization server. Clients that auto-discover authentication (ChatGPT custom apps, Claude Desktop remote, MCP Inspector, any [MCP 2025-11-25](https://modelcontextprotocol.io/specification) client) can sign in against your Zabbix MCP deployment **without an external IdP, without a hardcoded bearer, and without operators learning OAuth library internals**.
+
+```toml
+[server]
+public_url = "https://mcp.example.com"  # required when OAuth is on
+
+[oauth]
+enabled = true
+```
+
+What you get:
+
+- **Discovery** - RFC 8414 `/.well-known/oauth-authorization-server`, RFC 9728 `/.well-known/oauth-protected-resource`, `WWW-Authenticate: Bearer ... resource_metadata="..."` on 401.
+- **Dynamic client registration** - RFC 7591 `/register`. ChatGPT's "Advanced OAuth settings" auto-detects everything from the discovery documents.
+- **Authorization code + PKCE S256**, refresh-token rotation, RFC 7009 revocation, RFC 8707 audience binding.
+- **Two-step consent screen** (v1.29) - operator credentials check, then per-scope checkbox grant. Wildcard `*` and concrete groups are mutually exclusive. Role caps the grant: `admin` may grant any scope, `operator` is limited to `monitoring / data_collection / alerts / extensions`, `viewer` to `monitoring / extensions`.
+- **Refresh-token reuse detection** (RFC 6819 §5.2.2.3) - replaying an already-rotated refresh token revokes the entire token family and writes an audit row.
+- **Per-client IP allowlist + TTL override** in `[oauth_clients.<id>]`, editable from the OAuth Clients page in the admin portal.
+- **Login uses the existing admin-portal users** ([admin.users.*], scrypt-hashed) - operators do not maintain a second identity store. Login + consent UI mirrors the admin portal theme.
+- **Audit log integration** - every OAuth event (login_success, consent_granted, token_revoked, ...) lands in `audit.log` for forensic reconstruction.
+- **Legacy bearer mode keeps working alongside OAuth** - existing `[tokens.X]` clients need no migration.
+
+The legacy `[tokens.X]` bearer mode and OAuth coexist; you can run both at once. Full setup, security checklist, ChatGPT / Claude Desktop integration walkthrough, reverse-proxy snippets (Caddy / Nginx / Apache), and troubleshooting in [`docs/OAUTH.md`](docs/OAUTH.md).
+
 ## Update notifications
 
-Since v1.24, the admin portal pings the GitHub releases API once an hour and shows an "Update vX.Y available" pill in the top bar when a newer stable release is out. Click the pill to read the release notes. Disable in offline / air-gapped environments by setting:
+Since v1.24, the admin portal shows an "Update vX.Y available" pill in the top bar when a newer stable release is out. Click the pill to read the release notes.
+
+The GitHub releases API is polled at three triggers:
+
+1. **Once at server boot** (best-effort), so the banner reflects reality even before anyone logs in.
+2. **On every successful admin login**, throttled to one outbound call per 60 seconds. A burst of logins or a reload loop hits the cache, not GitHub.
+3. **On demand via the "Check now" button** next to the version pill - bypasses the throttle, useful right after an upgrade to confirm the new version registered without waiting out the cache.
+
+Disable in offline / air-gapped environments by setting:
 
 ```toml
 [admin]
 update_check_enabled = false
 ```
 
-The check is the only outbound HTTPS request the admin portal makes - it goes to `https://api.github.com/repos/initMAX/zabbix-mcp-server/releases/latest` and reads only the latest tag. Pre-releases are skipped. Failed checks (offline, rate limited, DNS) are silent and reuse the last successful answer cached at `/etc/zabbix-mcp/state/version-cache.json`.
+This is the only outbound HTTPS request the admin portal makes. It goes to `https://api.github.com/repos/initMAX/zabbix-mcp-server/releases/latest` and reads only the latest stable tag (pre-releases and drafts are skipped). Failed checks (offline, rate limited, DNS) are silent and reuse the last successful answer cached at `/etc/zabbix-mcp/state/version-cache.json`.
 
 The same toggle is also exposed in the admin portal at `Settings -> Admin Portal -> Check for updates`.
 

@@ -82,8 +82,17 @@
             <a href="{{ update_info.release_url | default('https://github.com/initMAX/zabbix-mcp-server/releases/latest', true) }}"
                target="_blank" rel="noopener"
                class="update-badge"
+               id="update-pill"
                style="margin-left:12px; padding:2px 10px; border-radius:999px; background:rgba(245,158,11,0.15); border:1px solid var(--color-warning); color:var(--color-warning); font-size:0.78rem; text-decoration:none; white-space:nowrap;"
                title="Click to view release notes">&#x2B06;&#xFE0F; Update v{{ update_info.latest }} available</a>
+            {% endif %}
+            {% if update_info %}
+            <button type="button"
+                    id="check-updates-btn"
+                    onclick="checkUpdatesNow(event)"
+                    class="check-updates-btn"
+                    style="margin-left:8px; padding:2px 8px; border-radius:999px; background:transparent; border:1px solid var(--color-border); color:var(--color-text-muted); font-size:0.75rem; cursor:pointer; white-space:nowrap;"
+                    title="Force a fresh GitHub release poll (bypasses the 60-second throttle)">&#x21BB; Check now</button>
             {% endif %}
         </div>
         <div class="header-right">
@@ -719,6 +728,48 @@
         }
         _legacyCopy(text, done);
     }
+    function checkUpdatesNow(ev) {
+        if (ev) { ev.preventDefault(); }
+        var btn = document.getElementById('check-updates-btn');
+        if (!btn) return;
+        var orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '↻ Checking...';
+        // CSRF: read the token from any form on the page (every admin
+        // page injects it via hidden input, e.g. the logout form).
+        var csrf = '';
+        var csrfInput = document.querySelector('input[name="csrf_token"]');
+        if (csrfInput) csrf = csrfInput.value;
+        fetch('/api/check-updates', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'X-CSRF-Token': csrf, 'Accept': 'application/json' },
+        })
+            .then(function (r) { return r.json().catch(function () { return { ok: false, reason: 'bad_response' }; }); })
+            .then(function (data) {
+                btn.disabled = false;
+                if (data && data.ok && data.available) {
+                    // Update available - reload to render the pill.
+                    btn.innerHTML = '✓ v' + data.latest + ' available - reloading';
+                    setTimeout(function () { window.location.reload(); }, 800);
+                } else if (data && data.ok) {
+                    btn.innerHTML = '✓ Up to date (v' + (data.current || '') + ')';
+                    setTimeout(function () { btn.innerHTML = orig; }, 4000);
+                } else if (data && data.reason === 'disabled') {
+                    btn.innerHTML = '✗ Disabled in settings';
+                    setTimeout(function () { btn.innerHTML = orig; }, 4000);
+                } else {
+                    btn.innerHTML = '✗ Check failed';
+                    setTimeout(function () { btn.innerHTML = orig; }, 4000);
+                }
+            })
+            .catch(function () {
+                btn.disabled = false;
+                btn.innerHTML = '✗ Network error';
+                setTimeout(function () { btn.innerHTML = orig; }, 4000);
+            });
+    }
+
     function _legacyCopy(text, done) {
         var ta = document.createElement('textarea');
         ta.value = text;

@@ -9,15 +9,24 @@
 
 """Lazy GitHub release check for the admin-portal update banner.
 
-The check fires from a successful admin login (see
-``AdminApp._login`` -> ``trigger_async``) instead of a hourly daemon
-thread, throttled to once per CHECK_INTERVAL_SECONDS so a burst of
-logins won't hammer the public GitHub rate limit. The result is
-cached in memory and persisted to
+The check fires:
+  1. once at server boot (best-effort so the banner reflects reality
+     even before anyone logs in), and
+  2. on every successful admin login (see ``AdminApp._login`` ->
+     ``trigger_async``), throttled to one outbound call per
+     CHECK_INTERVAL_SECONDS so a burst of logins or a reload loop
+     won't hammer the public GitHub rate limit (60 unauth req/h/IP).
+  3. on demand via ``/api/check-updates`` (admin/operator role) which
+     calls ``force_check()`` and bypasses the throttle. Wired to the
+     "Check now" button next to the version pill in the header so an
+     operator who just upgraded does not have to wait out the
+     throttle to confirm they are on the latest version.
+
+The result is cached in memory and persisted to
 ``/etc/zabbix-mcp/state/version-cache.json`` so a restart does not
-lose the last known answer (saves a check + survives the case
-where GitHub is briefly unreachable). Idle deployments with no
-admin sessions make zero outbound calls.
+lose the last known answer (survives the case where GitHub is
+briefly unreachable). Idle deployments with no admin sessions and
+no manual checks make zero outbound calls.
 
 Privacy note: this is the only outbound request the admin portal
 makes. It is documented in config.example.toml and
@@ -48,13 +57,17 @@ RELEASES_URL = "https://api.github.com/repos/initMAX/zabbix-mcp-server/releases/
 # entrypoint). /var/lib/zabbix-mcp does not exist in the container
 # image, so we keep persistent state under /etc/zabbix-mcp/state/.
 CACHE_PATH = Path("/etc/zabbix-mcp/state/version-cache.json")
-# Minimum gap between two GitHub polls. The check is now fired lazily
-# from a successful admin login (instead of a hourly daemon thread)
-# so two operators logging in within seconds do not double-poll, and
-# the public GitHub rate limit (60 unauth req/h/IP) cannot be hit
-# even in a burst-login scenario. 30 minutes balances "operator just
-# logged back in expecting fresh info" against "don't hammer GitHub".
-CHECK_INTERVAL_SECONDS = 1800  # 30 min
+# Minimum gap between two GitHub polls fired by the login-success or
+# boot path. The check runs lazily from successful admin logins so the
+# throttle only needs to absorb burst scenarios (browser reload loop,
+# two operators logging in within seconds, automated health probes
+# hitting /login). 60 seconds is plenty for that and keeps the banner
+# fresh after an upgrade - an operator who just bumped the version
+# and logs in does not have to wait 30 minutes for the GitHub poll
+# to refresh. Manual "Check now" presses bypass this throttle via
+# ``force_check()``. Theoretical worst case at 60 sec: 60 polls/hour
+# vs the public 60 req/h/IP rate limit - matches but does not exceed.
+CHECK_INTERVAL_SECONDS = 60
 HTTP_TIMEOUT_SECONDS = 5
 
 
@@ -139,9 +152,9 @@ class UpdateChecker:
         the cache is older than CHECK_INTERVAL_SECONDS. Wired into
         the login-success path so a fresh check happens whenever an
         operator walks back into the portal, but not faster than
-        once every 30 minutes - a burst of logins won't hammer the
-        public GitHub rate limit (60 req / h / IP). No-op when the
-        feature is disabled."""
+        once every CHECK_INTERVAL_SECONDS - a burst of logins won't
+        hammer the public GitHub rate limit (60 req / h / IP). No-op
+        when the feature is disabled."""
         if not self.enabled:
             return
         import time as _time
@@ -159,6 +172,28 @@ class UpdateChecker:
             finally:
                 self._busy.release()
         threading.Thread(target=_runner, daemon=True, name="update-check-once").start()
+
+    def force_check(self) -> dict:
+        """Synchronous force-refresh that bypasses the throttle.
+
+        Wired to the manual "Check now" button on the admin portal.
+        Blocks for up to HTTP_TIMEOUT_SECONDS, returns a dict the
+        AJAX endpoint can hand straight back to the browser. Honours
+        the feature toggle - returns ``{"ok": False, "reason": "disabled"}``
+        when ``[admin].update_check_enabled = false``.
+        """
+        if not self.enabled:
+            return {"ok": False, "reason": "disabled", **self.to_context()}
+        # Serialize concurrent force-checks. If another check is
+        # already running (login-triggered or earlier "Check now")
+        # we wait for it instead of double-polling.
+        with self._busy:
+            try:
+                self._check()
+            except Exception as exc:
+                logger.debug("Forced update check failed: %s", exc)
+                return {"ok": False, "reason": "request_failed", **self.to_context()}
+        return {"ok": True, **self.to_context()}
 
     def _check(self) -> None:
         req = urllib_request.Request(
