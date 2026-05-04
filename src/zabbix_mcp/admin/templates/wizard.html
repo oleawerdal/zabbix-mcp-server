@@ -645,6 +645,64 @@
   </div>
 </div>
 
+{# Step 5 - reverse-proxy / TLS snippet generator #}
+{% if proxy_snippets %}
+<div id="wiz-step-5" class="wiz-step active">
+  <div class="wiz-step-header">
+    <span class="wiz-step-num">5</span>
+    <span class="wiz-step-title">Reverse proxy &amp; TLS</span>
+    <span class="tooltip-icon" tabindex="0" data-tooltip="Production deployments terminate TLS at a reverse proxy in front of the MCP server. Pick the proxy your stack already runs - the snippet below is generated from your [server].public_url so you can paste it directly. Skip this step if your MCP is reachable over HTTPS already (cloud tunnel, native TLS in [server].tls_cert_file).">&#x1F6C8;</span>
+  </div>
+
+  <div class="wiz-note" style="margin-bottom: 14px; background: var(--color-primary-light); border-color: var(--color-primary);">
+    {% if proxy_advice == "https_native" %}
+      <strong>&#x2705; HTTPS already terminated by the MCP server itself</strong> via <code>[server].tls_cert_file</code>. No reverse proxy needed - you can skip this step. The snippets below are still useful if you later want to put a proxy in front for path routing or to share <code>:443</code> with another vhost.
+    {% elif proxy_advice == "no_public_url" %}
+      <strong>&#x26A0;&#xFE0F; No <code>[server].public_url</code> set</strong>, so the snippets below assume the URL operator typed in step 4. Set <code>public_url</code> in <a href="/settings#mcp-server" style="color: inherit; text-decoration: underline;">Settings</a> to lock it in.
+    {% else %}
+      <strong>&#x1F4DD; Pick the proxy you run.</strong> The snippet listens on <code>:443</code> for the host in your <code>public_url</code>, terminates TLS, and forwards everything to the MCP backend on <code>{{ url_ctx.url }}</code>. OAuth + MCP + admin assets all share the same backend so a single <code>ProxyPass /</code> / <code>location /</code> covers them.
+    {% endif %}
+  </div>
+
+  <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;">
+    {% for snip in proxy_snippets %}
+    <a href="?{{ proxy_qs }}&proxy={{ snip.id }}#wiz-step-5"
+       class="badge {% if snip.id == proxy_id %}badge-success{% else %}badge-muted{% endif %}"
+       style="text-decoration: none; padding: 4px 12px;">
+      {{ snip.label }}
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="wiz-instructions" style="margin-bottom: 14px;">
+    <strong>{{ active_proxy.label }}</strong>
+    <ol>
+      {% for step in active_proxy.steps %}
+      <li>{{ step }}</li>
+      {% endfor %}
+    </ol>
+  </div>
+
+  <div class="wiz-code-block" style="margin-bottom: 14px;">
+    <div class="wiz-code-label">{{ active_proxy.config_path }}<span class="wiz-code-format-badge">{{ active_proxy.format }}</span></div>
+    <div class="wiz-code-row">
+      <div class="wiz-code-box" id="wiz-proxy-snippet">{{ active_proxy.snippet }}</div>
+      <button type="button" class="wiz-code-copy"
+              onclick="copyToClipboard(document.getElementById('wiz-proxy-snippet').textContent.trim(), this)"
+              title="Copy to clipboard" aria-label="Copy proxy config">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="wiz-code-caption">
+      Drop into <code>{{ active_proxy.config_path }}</code> and reload {{ active_proxy.daemon }}. After the reload, hit <code>{{ url_ctx.url_proxied }}/.well-known/oauth-authorization-server</code> from a browser - JSON HTTP 200 means OAuth discovery is reachable end-to-end.
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <script>
   (function() {
     // Both the config snippet and the curl quick-test are code boxes that

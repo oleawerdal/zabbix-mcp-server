@@ -211,6 +211,119 @@ def _expand_scope_tools(scopes: list[str]) -> list[str]:
     return sorted(set(_expand_tool_groups(scopes)))
 
 
+_PROXY_CATALOG: dict[str, dict] = {
+    "caddy": {
+        "id": "caddy",
+        "label": "Caddy",
+        "format": "caddy",
+        "config_path": "/etc/caddy/Caddyfile",
+        "daemon": "caddy",
+        "steps": [
+            "Install Caddy on a host that can reach the MCP backend.",
+            "Open `/etc/caddy/Caddyfile` (or your existing Caddyfile).",
+            "Append the snippet on the right.",
+            "`sudo systemctl reload caddy` (Caddy auto-fetches a Let's Encrypt cert on first request).",
+        ],
+    },
+    "nginx": {
+        "id": "nginx",
+        "label": "Nginx",
+        "format": "nginx",
+        "config_path": "/etc/nginx/conf.d/zabbix-mcp.conf",
+        "daemon": "nginx",
+        "steps": [
+            "Install Nginx + a TLS cert (Let's Encrypt via certbot recommended).",
+            "Create `/etc/nginx/conf.d/zabbix-mcp.conf` with the snippet on the right.",
+            "Verify with `sudo nginx -t`.",
+            "`sudo systemctl reload nginx`.",
+        ],
+    },
+    "apache": {
+        "id": "apache",
+        "label": "Apache (httpd)",
+        "format": "apache",
+        "config_path": "/etc/httpd/conf.d/zabbix-mcp.conf",
+        "daemon": "httpd",
+        "steps": [
+            "Install Apache + mod_ssl + mod_proxy_http (most distro `httpd` packages bundle the proxy modules already).",
+            "Create `/etc/httpd/conf.d/zabbix-mcp.conf` (Debian/Ubuntu: `/etc/apache2/sites-available/zabbix-mcp.conf` + `a2ensite`).",
+            "Run a TLS cert provisioning step (Let's Encrypt: `certbot --apache`).",
+            "Validate config: `sudo apachectl -t`.",
+            "`sudo systemctl reload httpd` (or `apache2`).",
+        ],
+    },
+}
+
+
+def _proxy_snippet(proxy_id: str, public_url: str, backend_url: str) -> str:
+    """Render a copy-paste-ready reverse-proxy config snippet."""
+    from urllib.parse import urlparse
+    pu = urlparse(public_url)
+    host = pu.hostname or "mcp.example.com"
+    if proxy_id == "caddy":
+        return (
+            f"{host} {{\n"
+            f"    reverse_proxy {backend_url}\n"
+            f"}}\n"
+        )
+    if proxy_id == "nginx":
+        return (
+            f"server {{\n"
+            f"    listen 443 ssl http2;\n"
+            f"    server_name {host};\n"
+            f"\n"
+            f"    ssl_certificate     /etc/letsencrypt/live/{host}/fullchain.pem;\n"
+            f"    ssl_certificate_key /etc/letsencrypt/live/{host}/privkey.pem;\n"
+            f"    include /etc/letsencrypt/options-ssl-nginx.conf;\n"
+            f"\n"
+            f"    # Streamable-HTTP MCP keeps connections open for SSE; disable buffering.\n"
+            f"    proxy_buffering off;\n"
+            f"    proxy_read_timeout 600s;\n"
+            f"    proxy_http_version 1.1;\n"
+            f"    proxy_set_header Connection \"\";\n"
+            f"\n"
+            f"    proxy_set_header Host              $host;\n"
+            f"    proxy_set_header X-Real-IP         $remote_addr;\n"
+            f"    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;\n"
+            f"    proxy_set_header X-Forwarded-Proto $scheme;\n"
+            f"\n"
+            f"    location / {{\n"
+            f"        proxy_pass {backend_url};\n"
+            f"    }}\n"
+            f"}}\n"
+            f"\n"
+            f"server {{\n"
+            f"    listen 80;\n"
+            f"    server_name {host};\n"
+            f"    return 301 https://$host$request_uri;\n"
+            f"}}\n"
+        )
+    if proxy_id == "apache":
+        return (
+            f"<VirtualHost *:443>\n"
+            f"    ServerName {host}\n"
+            f"\n"
+            f"    SSLEngine on\n"
+            f"    SSLCertificateFile    /etc/letsencrypt/live/{host}/fullchain.pem\n"
+            f"    SSLCertificateKeyFile /etc/letsencrypt/live/{host}/privkey.pem\n"
+            f"    Include /etc/letsencrypt/options-ssl-apache.conf\n"
+            f"\n"
+            f"    ProxyPreserveHost On\n"
+            f"    ProxyTimeout 600\n"
+            f"    RequestHeader set X-Forwarded-Proto \"https\"\n"
+            f"\n"
+            f"    ProxyPass        / {backend_url}\n"
+            f"    ProxyPassReverse / {backend_url}\n"
+            f"</VirtualHost>\n"
+            f"\n"
+            f"<VirtualHost *:80>\n"
+            f"    ServerName {host}\n"
+            f"    Redirect permanent / https://{host}/\n"
+            f"</VirtualHost>\n"
+        )
+    return f"# Unknown proxy '{proxy_id}'"
+
+
 def _resolve_url_context(
     admin_app,
     transport: str,
@@ -494,6 +607,42 @@ async def wizard_view(request: Request) -> Response:
         if client_id:
             return_to += f"&client={quote_plus(client_id)}"
 
+    # Step 5: reverse-proxy / TLS snippet generator. Only renders when
+    # the operator has reached step 4 (so we know which URL to point
+    # the proxy at) and the server is not already serving HTTPS itself.
+    proxy_id = (qp.get("proxy") or "caddy").lower()
+    if proxy_id not in _PROXY_CATALOG:
+        proxy_id = "caddy"
+    proxy_snippets: list[dict] = []
+    active_proxy: dict | None = None
+    proxy_advice = ""
+    if selected_client and url_ctx:
+        backend_url_for_proxy = (
+            url_ctx.get("url_loopback")
+            or f"http://127.0.0.1:{admin_app.config.server.port}"
+        )
+        public_url = (admin_app.config.server.public_url or url_ctx.get("url", "")).rstrip("/")
+        if not public_url:
+            proxy_advice = "no_public_url"
+            public_url = url_ctx.get("url", "")
+        if admin_app.config.server.tls_cert_file and admin_app.config.server.tls_key_file:
+            proxy_advice = "https_native"
+        proxy_snippets = [{"id": pid, "label": meta["label"]} for pid, meta in _PROXY_CATALOG.items()]
+        meta = _PROXY_CATALOG[proxy_id]
+        active_proxy = {
+            **meta,
+            "snippet": _proxy_snippet(proxy_id, public_url, backend_url_for_proxy),
+        }
+        # url_ctx fallback for the "validate after reload" hint
+        url_ctx = dict(url_ctx)
+        url_ctx.setdefault("url_proxied", public_url or url_ctx.get("url", ""))
+
+    proxy_qs = f"server={quote_plus(server_name)}&token={quote_plus(token_id)}&client={quote_plus(client_id)}"
+    if effective_transport:
+        proxy_qs += f"&transport={effective_transport}"
+    if effective_auth_mode:
+        proxy_qs += f"&auth_mode={effective_auth_mode}"
+
     return admin_app.render("wizard.html", request, {
         "active": "wizard",
         "page_title": "Client MCP Wizard",
@@ -530,6 +679,12 @@ async def wizard_view(request: Request) -> Response:
         "client_auth_modes": client_auth_modes,
         "auth_mode_choices": auth_mode_choices,
         "effective_auth_mode": effective_auth_mode,
+        # Step 5 reverse-proxy snippet
+        "proxy_snippets": proxy_snippets,
+        "active_proxy": active_proxy,
+        "proxy_id": proxy_id,
+        "proxy_qs": proxy_qs,
+        "proxy_advice": proxy_advice,
         # Permissions
         "can_create_token": session.role in ("admin", "operator"),
     })
