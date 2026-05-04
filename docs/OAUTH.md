@@ -218,7 +218,34 @@ enabled = true
 login_path = "/oauth/login"
 dynamic_registration_enabled = true
 default_scopes = ["*"]
+# Token lifetimes (operator hardening - shorten on high-risk
+# deployments at the cost of more /token calls from clients).
+auth_code_ttl_seconds      = 600       # 10 min  (OAuth 2.1 §4.1.3)
+access_token_ttl_seconds   = 3600      # 1 hour
+refresh_token_ttl_seconds  = 2592000   # 30 days, rotated on each use
 ```
+
+### Per-client overrides
+
+Each `[oauth_clients.<id>]` row may carry its own hardening
+fields that override the global `[oauth]` defaults. Edit them
+either by hand in `config.toml` or via the OAuth Clients page in
+the admin portal (`/oauth-clients/<id>` -> Hardening card):
+
+```toml
+[oauth_clients.5d8f...]
+client_name = "ChatGPT custom app"
+redirect_uris = ["https://chatgpt.com/connector/oauth/..."]
+# Optional: stricter than [oauth] defaults
+allowed_ips                 = ["203.0.113.0/24"]
+access_token_ttl_seconds    = 900     # 15 min for sensitive deployments
+refresh_token_ttl_seconds   = 86400   # 1 day
+```
+
+The IP allowlist runs at `/token` time, same CIDR semantics as
+`[tokens.X].allowed_ips`. The TTL overrides apply both to the
+initial code-grant exchange and to subsequent refresh-token
+rotations for that client.
 
 Restart the MCP server. The startup log shows:
 
@@ -283,6 +310,49 @@ rejects any token whose `aud` does not match this deployment's
 canonical URL. A token issued for `https://mcp.alpha.com` cannot be
 replayed against `https://mcp.beta.com` even if both servers share
 their token-store key material.
+
+## Operator role cap on consent
+
+The consent screen renders the per-scope checkboxes pre-ticked
+according to what the client requested, but the operator cannot
+grant a scope wider than their own admin-portal role allows.
+This is the OAuth-side expression of "least privilege" the admin
+portal already enforces elsewhere.
+
+| Admin portal role | Maximum scope grant |
+|---|---|
+| `admin`    | `*` (everything, including write operations) |
+| `operator` | `monitoring`, `data_collection`, `alerts`, `extensions` |
+| `viewer`   | `monitoring`, `extensions` (read-only) |
+
+Rows outside the operator's cap render disabled with a
+"not available to your role (<role>); ask an admin" hint.
+Server-side check at consent-grant time intersects the form-posted
+scope set with the operator's cap and rejects with HTTP 403 if the
+result is empty - so a determined operator who edits the disabled
+checkbox in the DOM cannot bypass the cap.
+
+## Refresh-token reuse detection
+
+Per RFC 6819 §5.2.2.3, replaying an already-rotated refresh token
+is a strong signal that one of the two parties holding it (the
+legitimate client and an attacker) is malicious. The server
+defends:
+
+1. Each authorization-code grant starts a refresh-token "family"
+   identified by an opaque ID.  Refresh-token rotation reuses the
+   same family.
+2. When a request hits `/token` with a refresh token that the
+   server has already consumed (rotated), the entire family is
+   revoked: every access token + every refresh token tied to the
+   original grant is wiped from memory.
+3. An audit row `oauth.token_family_revoked` is written with
+   `reason="refresh_token_reuse_detected"` so the operator can
+   spot the incident.
+
+Effect on the client side: both the legitimate client and the
+attacker get 401 on their next request and have to run the full
+authorize flow again. No silent-takeover window.
 
 ## Scope catalog
 

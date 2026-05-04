@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.29 - 2026-05-04
+
+OAuth polish release. v1.28 shipped the embedded OAuth 2.1 authorization server; v1.29 closes the loop on operator hygiene that came out of field deployment - two-step consent screen with per-scope checkboxes, role-capped scope grant, refresh-token reuse detection, per-client IP allowlists and TTL overrides, and a wizard step that generates a Caddy / Nginx / Apache reverse-proxy config from `[server].public_url`.
+
+### Added
+
+- **Two-step consent screen on `/oauth/login`** with per-scope checkboxes. After credentials check, the server renders a consent surface listing the scopes the client is asking for plus a `Sign in & allow` / `Deny` choice. Wildcard `*` and the six concrete scope groups are mutually exclusive: ticking `*` disables and dims the others; unticking it re-enables them so the operator can downscope the grant. Server drops redundant `*`-plus-narrow combinations before audit.
+- **Operator role caps the consent grant.** `admin` may grant any scope; `operator` may grant `monitoring / data_collection / alerts / extensions` but not `users / administration`; `viewer` may grant `monitoring / extensions` only. Out-of-cap rows render disabled with a "not available to your role" hint. Server-side intersection at consent-grant time enforces the cap regardless of DOM tampering. Login_success audit row carries the granted role.
+- **Refresh-token reuse detection (RFC 6819 §5.2.2.3).** Each authorization-code grant starts a refresh-token family. Replaying an already-rotated refresh token revokes the entire family (every access + refresh token derived from the original grant) and writes an `oauth.token_family_revoked` audit row with `reason="refresh_token_reuse_detected"`. The legitimate client and the attacker both have to re-authorize.
+- **Per-client IP allowlist + TTL override.** `[oauth_clients.<id>]` rows accept optional `allowed_ips`, `access_token_ttl_seconds`, `refresh_token_ttl_seconds`. The IP allowlist runs at `/token` time with the same CIDR semantics as `[tokens.X].allowed_ips`. The TTL overrides apply to both the original-grant path and the refresh-rotation path. Editable from the OAuth Clients detail page in the admin portal (Hardening card).
+- **Configurable global token TTLs** via `[oauth].auth_code_ttl_seconds / access_token_ttl_seconds / refresh_token_ttl_seconds`. Defaults preserve v1.28 behaviour (10 min / 1 h / 30 days). Operator-side hardening for high-risk deployments.
+- **Audit log integration for OAuth events.** `oauth.login_success`, `oauth.login_failed`, `oauth.consent_granted`, `oauth.consent_denied`, `oauth.client_register`, `oauth.token_revoked_by_client`, `oauth.token_family_revoked`, `oauth_client.scope_update`, `oauth_client.settings_update`. An auditor can now reconstruct any OAuth interaction from the audit log alone.
+- **Per-client scope editing** in the OAuth Clients detail page. Replaces the read-only "Granted scope: <string>" line with a checkbox list (one row per scope group + a wildcard row in warning yellow). Active access tokens stay valid until they expire; the change applies to the next `/authorize` from the client.
+- **Wizard step 5: reverse-proxy / TLS snippet generator.** Generates a Caddy / Nginx / Apache config block from `[server].public_url` so the operator can paste it into their proxy and reload. Detects three states: native HTTPS already (skip-this-step hint), `public_url` unset (warning), or default (snippet listens on :443 and forwards to MCP backend). Each tab shows numbered install steps + the file path to drop the snippet into + a verification curl to hit `<public_url>/.well-known/oauth-authorization-server`.
+- **Tooltip-icons on every OAuth Clients page section** so an operator landing on the page knows what each column / card / form represents without reading the docs.
+- **End-to-end OAuth integration test** (`tests/test_oauth_e2e.py`) drives the full flow on a real subprocess MCP server: discovery -> register -> authorize -> two-step login + consent -> code -> token -> MCP call -> refresh + rotation -> revoke -> post-rotation rejection. Catches regressions in the OAuth surface that unit tests on the provider object alone cannot reach.
+
+### Fixed
+
+- **GET `/oauth/login` honours the request_id TTL.** v1.28 only checked expiry on POST; an expired request_id rendered the login form on GET, then 400'd at submit. Now both methods reject with the standard error page.
+- **Wildcard / concrete scope checkboxes were additive on the consent screen.** Operator screenshot caught it: "Full access (*)" was checked and Monitoring + Data collection were also checked. Granting `*` already covers the others, so the redundant ticks were misleading and the audit log reflected a wider-than-intended grant. Now the wildcard and the six concrete groups are mutually exclusive both client-side and server-side.
+- **Wizard transport / OS / IP / step-3 client-card links lost `auth_mode`** so an operator who picked OAuth then clicked a different transport silently fell back to bearer mode. Threaded `effective_auth_mode` through every URL builder in `wizard.html`.
+- **OAuth Clients revoke form was a no-op** because the template used `{{ csrf_input | safe }}` (silently undefined) instead of the `csrf_token` string AdminApp.render injects. Every revoke ended in a 403 from `_CsrfMiddleware`. Replaced with the `<input type="hidden" name="csrf_token" value="...">` pattern every other admin form uses.
+- **`_access_to_refresh` table grew unbounded** on long-lived sessions because `exchange_refresh_token` rotated the refresh and minted a fresh access token without removing the old AT or its back-pointer. Now sweeps both during rotation; orphan back-pointers (where the AT was already evicted by TTL) get cleaned in the same pass.
+- **`/static/<path>` traversal guard** used `str(target).startswith(...)` instead of `Path.is_relative_to()`. Switched to the latter (matches the comment that was already there).
+- **`complete_pending` produced malformed redirect URLs** when the registered redirect_uri carried a query string or a fragment. Switched to the framework helper `construct_redirect_uri` which parses + re-encodes via `urlparse` / `urlunparse`.
+- **`/oauth/login` POST checked credentials before the pending request_id was still alive.** An expired request_id burned a brute-force budget slot before failing at `complete_pending`. Now expiry-checks first.
+- **OAuth Clients consent disclaimer link `/oauth-clients`** 404'd because the link points at the admin portal port (default 9090), not the MCP / Apache port the operator is on. Replaced with plain text describing how to reach the page.
+- **E2E test was order-dependent.** `tests/test_admin.py::TestRawJsonPolicy` set `current_token_info` on a contextvar in the parent test process; subsequent `urllib.request.urlopen` calls with a Bearer header in that process triggered the MCP framework's 406 "Not Acceptable" response under some Python 3.13 conditions. Switched the e2e test's `/mcp` calls from urllib to `http.client` (which sends headers verbatim and shares no global state). Full suite now: 341 passed deterministic.
+
+### Documentation
+
+- `docs/OAUTH.md` gains "Operator role cap on consent" and "Refresh-token reuse detection" sections plus per-client TTL / IP allowlist examples.
+- `docs/CHATGPT-CUSTOM-APP.md` updated to walk the two-step consent flow with screenshots (login form -> consent screen with wildcard ticked -> consent screen with wildcard unticked) plus a "what the role cap means for you" callout.
+- `docs/screenshots-oauth/` adds 10-consent-wildcard-default.png and 11-consent-wildcard-unticked.png from a live deployment so the docs match what the operator actually sees.
+
 ## v1.28 - 2026-05-04
 
 OAuth 2.1 release. Three issues land together (#36, #38, #39) plus a full audit-trail of UI polish and security hardening discovered along the way. The headline change is the embedded OAuth 2.1 authorization server: ChatGPT custom apps, Claude Desktop remote connectors, MCP Inspector, and any MCP 2025-11-25 compliant client can now negotiate auth against a Zabbix MCP deployment without an external IdP, without a hardcoded bearer, and without operators learning OAuth library internals.

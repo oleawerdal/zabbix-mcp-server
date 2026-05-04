@@ -115,10 +115,40 @@ with "ChatGPT is asking to use your operator account":
 ![Login form](screenshots-oauth/01-login-form.png)
 
 Type the **admin-portal username + password** (`[admin.users.X]`
-in your `config.toml`). After "Sign in & allow", the browser is
-302-redirected to ChatGPT carrying the authorization code, ChatGPT
-exchanges it for an access token at `/token`, and the tab closes
-itself.
+in your `config.toml`).
+
+### 6b. Consent screen - what you are granting
+
+After credentials check, the server renders a **consent screen**
+listing the scopes and the operator role that is signing in:
+
+![Consent screen with wildcard ticked + concrete groups dimmed](screenshots-oauth/10-consent-wildcard-default.png)
+
+Two important controls here:
+
+- **Wildcard vs concrete groups are mutually exclusive.** The
+  default has `Full access (all tools)` ticked because ChatGPT's
+  registration request asks for `*`.  When you untick it, the six
+  concrete groups (`monitoring`, `data_collection`, `alerts`,
+  `users`, `administration`, `extensions`) re-enable so you can
+  pick a narrower combination:
+
+  ![Wildcard unticked, concrete groups enabled](screenshots-oauth/11-consent-wildcard-unticked.png)
+
+  The audit log records the actual grant, not the requested set,
+  so a downscoped grant shows up as `granted_scopes=["monitoring",
+  "extensions"]` instead of the wider `["*"]`.
+
+- **Role cap is enforced server-side.** Your admin-portal role
+  (admin / operator / viewer) determines the maximum scope set
+  you may grant.  An operator-role user cannot grant `users` or
+  `administration` to a third-party client even if the client
+  asked for `*`; those rows render disabled with a "not available
+  to your role" hint.
+
+After "Sign in & allow", the browser is 302-redirected to ChatGPT
+carrying the authorization code, ChatGPT exchanges it for an
+access token at `/token`, and the tab closes itself.
 
 > Heads up: the OAuth request_id has a 10-minute TTL. If you walk
 > away from the login form for too long, you get an "Authorization
