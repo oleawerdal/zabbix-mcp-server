@@ -354,6 +354,60 @@ compact_output = true
 #   disabled_tools = ["script", "configuration"]
 
 # ---------------------------------------------------------------------------
+# OAuth 2.1 Authorization Server (since v1.28)
+# ---------------------------------------------------------------------------
+# Embedded OAuth 2.1 AS so ChatGPT custom apps, Claude Desktop remote
+# connectors, MCP Inspector, and any MCP 2025-11-25 client can sign in
+# against this deployment without an external IdP. Login uses the
+# admin-portal users defined under [admin.users.*]. Disabled by default;
+# the server still accepts [tokens.*] bearer auth as before.
+#
+# Requires [server].public_url to be set so OAuth discovery
+# (.well-known/oauth-authorization-server) advertises a URL the client
+# can reach. See docs/OAUTH.md for the full setup walk-through plus
+# reverse-proxy and Let's Encrypt examples.
+
+# [oauth]
+# enabled = true
+#
+# Lifetime of single-use authorization codes (default 600 s = 10 min).
+# auth_code_ttl_seconds = 600
+#
+# Default access-token lifetime (default 3600 s = 1 h). Override
+# per-client via [oauth_clients.<id>].access_token_ttl_seconds.
+# access_token_ttl_seconds = 3600
+#
+# Default refresh-token lifetime (default 2592000 s = 30 days). Override
+# per-client via [oauth_clients.<id>].refresh_token_ttl_seconds.
+# refresh_token_ttl_seconds = 2592000
+#
+# RFC 7591 dynamic client registration on /register. Set false to
+# lock the AS down to manually pre-registered clients only - new
+# clients must then be added by the operator (admin portal -> OAuth
+# Clients -> Register, or by writing an [oauth_clients.<id>] block
+# below by hand).
+# dynamic_registration_enabled = true
+
+# Per-client overrides + hardening. The id is the OAuth client_id
+# (auto-generated for dynamic-registered clients, manually chosen for
+# pre-registered ones). Most operators do not need to touch this -
+# the admin portal "OAuth Clients" page edits these blocks for you.
+
+# [oauth_clients.example_client]
+# # RFC 7591 space-separated scope cap. The consent screen still
+# # applies (operator picks what to grant); this caps what the client
+# # is allowed to request.
+# scope = "monitoring extensions"
+#
+# # IP allowlist (CIDR supported). Token request rejected at /token
+# # if the client comes from an IP outside this list.
+# allowed_ips = ["192.0.2.0/24", "203.0.113.42"]
+#
+# # Lifetime overrides for this client only.
+# access_token_ttl_seconds = 1800
+# refresh_token_ttl_seconds = 604800
+
+# ---------------------------------------------------------------------------
 # Admin Portal
 # ---------------------------------------------------------------------------
 # Web-based administration portal for managing MCP tokens, users, report

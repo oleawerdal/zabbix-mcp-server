@@ -19,7 +19,7 @@
     <a href="https://github.com/initMAX/zabbix-mcp-server/releases"><img alt="Version" src="https://img.shields.io/github/v/release/initMAX/zabbix-mcp-server?color=%231f65f4&label=version"></a>&nbsp;
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>&nbsp;
     <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-blue">&nbsp;
-    <img alt="Tools" src="https://img.shields.io/badge/tools-235-green">&nbsp;
+    <img alt="Tools" src="https://img.shields.io/badge/tools-237-green">&nbsp;
     <img alt="Zabbix" src="https://img.shields.io/badge/zabbix-5.0%E2%80%948.0-red">&nbsp;
     <a href="https://safeskill.dev/scan/initmax-zabbix-mcp-server"><img alt="SafeSkill" src="https://img.shields.io/badge/SafeSkill-100%2F100_Verified%20Safe-brightgreen"></a>
 </div>
@@ -47,7 +47,7 @@ The server runs as a standalone HTTP service. AI clients connect to it over the 
 ## Features
 
 - **Complete API coverage** - All 58 Zabbix API groups (223 tools): hosts, problems, triggers, templates, users, dashboards, and more
-- **Extension tools** (12) - **Pre-correlated views**: `host_status_get`, `hostgroup_overview_get`, `infrastructure_summary_get`, `item_history_summary_get`, `problem_active_get` (fold 3-5 raw API calls into one round-trip). Plus `graph_render` (PNG export), `anomaly_detect` (z-score analysis), `capacity_forecast` (linear regression), `item_threshold_search` (filter items by `lastvalue` thresholds), `report_generate` (PDF reports), `action_prepare`/`action_confirm` (two-step write approval).
+- **Extension tools** (14) - **Pre-correlated views**: `host_status_get`, `hostgroup_overview_get`, `infrastructure_summary_get`, `item_history_summary_get`, `problem_active_get` (fold 3-5 raw API calls into one round-trip). Plus `graph_render` (PNG export), `anomaly_detect` (z-score analysis), `capacity_forecast` (linear regression), `item_threshold_search` (filter items by `lastvalue` thresholds), `report_generate` (PDF reports), `action_prepare`/`action_confirm` (two-step write approval), `health_check` (server diagnostics) and `zabbix_raw_api_call` (admin escape hatch for un-wrapped methods).
 - **Admin web portal** - Full web UI on port 9090 for managing tokens, users, servers, templates, settings, and audit log; dark/light mode; point-and-click **Client MCP Wizard (beta)** that generates copy-paste-ready config snippets for 14 AI clients (Claude, Codex, Cursor, Cline, VS Code, JetBrains, Goose, Open WebUI, 5ire, Gemini CLI, n8n, ...)
 - **Multi-token authentication** - Named tokens with scopes, IP restrictions, server binding, expiry; managed via admin portal, CLI (`generate-token`), or config.toml
 - **Multi-server support** - Connect to multiple Zabbix instances (production, staging, ...) with separate tokens
@@ -903,7 +903,7 @@ All three paths write to the same `/etc/zabbix-mcp/templates/` directory and are
 
 ## Token Budget
 
-By default the server exposes all 235 tools (223 Zabbix API + 12 extension). Each tool's JSON schema (name, description, 20-40 optional parameters) adds roughly 400-500 tokens to the MCP tool catalog that is sent to the LLM at the start of every session. **With the default "all tools" configuration, the catalog alone costs ~100k tokens before your first prompt even reaches the model.** This is the single largest driver of token usage - far more than compact vs. extended response mode.
+By default the server exposes all 237 tools (223 Zabbix API + 14 extension). Each tool's JSON schema (name, description, 20-40 optional parameters) adds roughly 400-500 tokens to the MCP tool catalog that is sent to the LLM at the start of every session. **With the default "all tools" configuration, the catalog alone costs ~100k tokens before your first prompt even reaches the model.** This is the single largest driver of token usage - far more than compact vs. extended response mode.
 
 **Fix:** add a `tools` allowlist in `[server]` to expose only what you need:
 
@@ -919,13 +919,13 @@ tools = ["host", "hostgroup", "problem", "trigger", "event", "item"]
 
 Or use group names as shortcuts (pulls in more tools per group):
 
-| Group | Tools (approx) | Contains |
+| Group | Tools | Contains |
 |---|---|---|
-| `monitoring` | ~31 | host, hostgroup, item, trigger, problem, event, history, trend, graph, sla, discovery, httptest, ... |
-| `alerts` | ~16 | action, alert, mediatype, script |
-| `data_collection` | ~107 | template, templategroup, templatedashboard, valuemap, dashboard |
-| `users` | ~30 | user, usergroup, userdirectory, usermacro, token, role, mfa |
-| `administration` | ~39 | settings, housekeeping, authentication, maintenance, map, proxy, ... |
+| `monitoring` | 87 | host, hostgroup, item, trigger, problem, event, history, trend, graph, sla, discovery, httptest, hostinterface, hostprototype, ... + the 5 pre-correlated views |
+| `data_collection` | 27 | template, templategroup, templatedashboard, valuemap, dashboard |
+| `alerts` | 16 | action, alert, mediatype, script |
+| `users` | 39 | user, usergroup, userdirectory, usermacro, token, role, mfa |
+| `administration` | 59 | settings, housekeeping, authentication, maintenance, map, proxy, proxygroup, autoreg, regexp, ... |
 | `extensions` | 14 | graph_render, anomaly_detect, capacity_forecast, item_threshold_search, report_generate, action_prepare, action_confirm, problem_active_get, host_status_get, hostgroup_overview_get, infrastructure_summary_get, item_history_summary_get, zabbix_raw_api_call, health_check |
 
 The same mechanism works per-token via `[tokens.*].scopes` - see [MCP Authentication](#mcp-authentication-optional).
@@ -957,7 +957,7 @@ All available options with detailed descriptions are in [`config.example.toml`](
 <tr><td><code>log_file</code></td><td>Path to log file (parent directory must exist)</td></tr>
 <tr><td><code>auth_token</code></td><td>Bearer token for HTTP/SSE authentication (supports <code>${ENV_VAR}</code>)</td></tr>
 <tr><td><code>rate_limit</code></td><td>Max Zabbix API calls per minute per client (default: <code>300</code>, set to <code>0</code> to disable)</td></tr>
-<tr><td><code>tools</code></td><td>Filter exposed tools by category or prefix — e.g. <code>["monitoring", "alerts"]</code> (default: all 235 tools)</td></tr>
+<tr><td><code>tools</code></td><td>Filter exposed tools by category or prefix — e.g. <code>["monitoring", "alerts"]</code> (default: all 237 tools)</td></tr>
 <tr><td><code>disabled_tools</code></td><td>Denylist counterpart to <code>tools</code> — exclude specific tool groups or prefixes</td></tr>
 <tr><td><code>tls_cert_file</code> / <code>tls_key_file</code></td><td>Enable native HTTPS — paths to TLS certificate and private key (see <a href="#tls--https">TLS / HTTPS</a> below)</td></tr>
 <tr><td><code>cors_origins</code></td><td>List of allowed CORS origins (default: disabled)</td></tr>
@@ -975,7 +975,7 @@ All available options with detailed descriptions are in [`config.example.toml`](
 <tr><td><code>access_token_ttl_seconds</code></td><td>Default access-token lifetime (default: <code>3600</code> = 1 h). Per-client override via <code>[oauth_clients.&lt;id&gt;].access_token_ttl_seconds</code></td></tr>
 <tr><td><code>refresh_token_ttl_seconds</code></td><td>Default refresh-token lifetime (default: <code>2592000</code> = 30 days). Per-client override via <code>[oauth_clients.&lt;id&gt;].refresh_token_ttl_seconds</code></td></tr>
 <tr><td><code>dynamic_registration_enabled</code></td><td>Allow RFC 7591 <code>/register</code> calls so clients self-register (default: <code>true</code>). Set <code>false</code> to lock down to manually pre-registered <code>[oauth_clients.*]</code> entries</td></tr>
-<tr><td rowspan="4"><code>[oauth_clients.&lt;id&gt;]</code></td><td><code>granted_scopes</code></td><td>Per-client scope cap (e.g. <code>["monitoring", "extensions"]</code>). Empty = client may request any scope; consent screen still applies</td></tr>
+<tr><td rowspan="4"><code>[oauth_clients.&lt;id&gt;]</code></td><td><code>scope</code></td><td>RFC 7591 space-separated scope cap (e.g. <code>"monitoring extensions"</code>). Empty = client may request any scope; consent screen still enforces the operator's role cap</td></tr>
 <tr><td><code>allowed_ips</code></td><td>Per-client IP allowlist (CIDR supported). Token rejected at <code>/token</code> if the client's IP is outside the list</td></tr>
 <tr><td><code>access_token_ttl_seconds</code></td><td>Override the global access-token TTL for this client only</td></tr>
 <tr><td><code>refresh_token_ttl_seconds</code></td><td>Override the global refresh-token TTL for this client only</td></tr>
