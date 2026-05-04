@@ -16,7 +16,18 @@
 </div>
 
 <style>
-  .wiz-step { margin-bottom: 32px; }
+  .wiz-step {
+    margin-bottom: 32px;
+    /* Anchor links into wiz-step-3 / wiz-step-4 (the inline
+       "back to step 3" link, the implicit hash after a token
+       click, ...) used to land with the step heading hidden
+       behind the 56px sticky page header. scroll-margin-top
+       reserves that distance so the browser's native anchor
+       scroll places the heading just below the header. Reported
+       2026-05-04 as "step 3 se posune moc malo". 16px breathing
+       gap on top of the header height for nicer visual landing. */
+    scroll-margin-top: calc(var(--header-height, 56px) + 16px);
+  }
   .wiz-step-header {
     display: flex; align-items: center; gap: 10px;
     margin-bottom: 14px;
