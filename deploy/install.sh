@@ -1983,7 +1983,7 @@ do_request_tls() {
         certbot_args+=(--email "$email")
     else
         certbot_args+=(--register-unsafely-without-email)
-        warn "No --email supplied. Let's Encrypt will not be able to email you about renewal failures."
+        info "No --email supplied - skipping registration email. Let's Encrypt won't be able to email you about renewal failures, but renewal still works automatically."
     fi
     certbot_args+=(--domains "$hostname")
     case "$mode" in
@@ -2014,6 +2014,20 @@ do_request_tls() {
     ln -sfn "$privkey"   "$CONFIG_DIR/tls/privkey.pem"
     chown -h "$SERVICE_USER:$SERVICE_USER" "$CONFIG_DIR/tls/fullchain.pem" "$CONFIG_DIR/tls/privkey.pem" 2>/dev/null || true
     ok "Symlinks: $CONFIG_DIR/tls/{fullchain,privkey}.pem -> /etc/letsencrypt/live/$hostname/"
+
+    # Permissions: certbot defaults to root:root 0600 on privkey.pem
+    # which the unprivileged $SERVICE_USER cannot read - the service
+    # crashes on boot with PermissionError on ctx.load_cert_chain().
+    # Fix: open the live/ + archive/ directories for traversal (other
+    # certs stay protected by their own per-file modes), and grant
+    # group-read on this hostname's privkey to $SERVICE_USER. Files
+    # live in archive/ - live/ is just a symlink to the latest set.
+    chmod 0755 /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
+    if [[ -d "/etc/letsencrypt/archive/$hostname" ]]; then
+        chgrp "$SERVICE_USER" /etc/letsencrypt/archive/"$hostname"/privkey*.pem 2>/dev/null || true
+        chmod 0640 /etc/letsencrypt/archive/"$hostname"/privkey*.pem 2>/dev/null || true
+        ok "Permissions: $SERVICE_USER granted read on /etc/letsencrypt/archive/$hostname/privkey*.pem"
+    fi
 
     # Wire the symlinks into config.toml. Idempotent: existing keys are
     # rewritten in place; missing keys are inserted under [server].
@@ -2049,11 +2063,26 @@ PY
 #!/usr/bin/env bash
 # Reload zabbix-mcp-server after a successful Let's Encrypt renewal.
 # Auto-installed by zabbix-mcp-server install.sh request-tls.
+#
+# RENEWED_DOMAINS / RENEWED_LINEAGE are exported by certbot. Use them
+# to scope our chgrp to the lineage that actually rotated, instead of
+# touching every cert on the box. Idempotent: re-runs are safe.
 set -e
+if [[ -n "\${RENEWED_LINEAGE:-}" ]]; then
+    archive_dir="/etc/letsencrypt/archive/\$(basename "\$RENEWED_LINEAGE")"
+    if [[ -d "\$archive_dir" ]]; then
+        # certbot resets privkey to 0600 root:root on every renewal,
+        # so we re-grant read to \$SERVICE_USER here. Without this the
+        # service would crash on the next boot with PermissionError.
+        chgrp "$SERVICE_USER" "\$archive_dir"/privkey*.pem 2>/dev/null || true
+        chmod 0640 "\$archive_dir"/privkey*.pem 2>/dev/null || true
+    fi
+fi
+chmod 0755 /etc/letsencrypt/live /etc/letsencrypt/archive 2>/dev/null || true
 systemctl reload-or-restart "$SERVICE_NAME" 2>/dev/null || systemctl restart "$SERVICE_NAME"
 HOOK
     chmod 755 "$hook_path"
-    ok "Renewal hook: $hook_path"
+    ok "Renewal hook: $hook_path (re-applies privkey perms on every renewal)"
 
     # Make sure certbot's renewal timer is enabled (most distro packages
     # ship one; just nudge it on).
