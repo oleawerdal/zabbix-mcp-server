@@ -970,6 +970,15 @@ All available options with detailed descriptions are in [`config.example.toml`](
 <tr><td><code>read_only</code></td><td>Block write operations (default: <code>true</code>)</td></tr>
 <tr><td><code>verify_ssl</code></td><td>Verify TLS certificates (default: <code>true</code>)</td></tr>
 <tr><td><code>skip_version_check</code></td><td>Skip zabbix-utils version compatibility check (default: <code>false</code>)</td></tr>
+<tr><td rowspan="5"><code>[oauth]</code></td><td><code>enabled</code></td><td>Turn the embedded OAuth 2.1 authorization server on (default: <code>false</code>). Required by ChatGPT custom apps and Claude Desktop remote connectors. Login uses <code>[admin.users.*]</code>; needs <code>[server].public_url</code>. See <a href="#oauth-21-authorization-server">OAuth 2.1 Authorization Server</a></td></tr>
+<tr><td><code>auth_code_ttl_seconds</code></td><td>Lifetime of single-use authorization codes (default: <code>600</code> = 10 min)</td></tr>
+<tr><td><code>access_token_ttl_seconds</code></td><td>Default access-token lifetime (default: <code>3600</code> = 1 h). Per-client override via <code>[oauth_clients.&lt;id&gt;].access_token_ttl_seconds</code></td></tr>
+<tr><td><code>refresh_token_ttl_seconds</code></td><td>Default refresh-token lifetime (default: <code>2592000</code> = 30 days). Per-client override via <code>[oauth_clients.&lt;id&gt;].refresh_token_ttl_seconds</code></td></tr>
+<tr><td><code>dynamic_registration_enabled</code></td><td>Allow RFC 7591 <code>/register</code> calls so clients self-register (default: <code>true</code>). Set <code>false</code> to lock down to manually pre-registered <code>[oauth_clients.*]</code> entries</td></tr>
+<tr><td rowspan="4"><code>[oauth_clients.&lt;id&gt;]</code></td><td><code>granted_scopes</code></td><td>Per-client scope cap (e.g. <code>["monitoring", "extensions"]</code>). Empty = client may request any scope; consent screen still applies</td></tr>
+<tr><td><code>allowed_ips</code></td><td>Per-client IP allowlist (CIDR supported). Token rejected at <code>/token</code> if the client's IP is outside the list</td></tr>
+<tr><td><code>access_token_ttl_seconds</code></td><td>Override the global access-token TTL for this client only</td></tr>
+<tr><td><code>refresh_token_ttl_seconds</code></td><td>Override the global refresh-token TTL for this client only</td></tr>
 </table>
 
 ## OAuth 2.1 Authorization Server
