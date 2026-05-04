@@ -458,6 +458,20 @@ a:hover {
     max-width: 100%;
 }
 
+/* Card titles that host an explanatory tooltip-icon need overflow
+   visible, otherwise the tooltip popup (absolute-positioned ::after
+   on the icon) gets clipped to the card-title rect and the operator
+   sees a hover-active icon with no popup. The user-controlled-name
+   truncation guard above does not apply to dashboard panels with
+   tooltip icons (Active Tasks, ...), where the title is operator-set
+   prose, so the trade-off is fine. Reported 2026-05-04 - tooltip-icon
+   on Active Tasks lit up on hover but no popup ever appeared because
+   the H2 overflow:hidden was clipping the absolutely-positioned
+   tooltip body. */
+.card-title:has(.tooltip-icon) {
+    overflow: visible;
+}
+
 .card-body {
     color: var(--text-secondary);
 }
