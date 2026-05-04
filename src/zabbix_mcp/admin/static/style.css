@@ -1257,7 +1257,7 @@ table.tokens-list td.col-actions .btn-sm {
    Used for things that would foot-gun the operator if changed from inside
    the portal, e.g. [admin].enabled. */
 .toggle input:disabled + .toggle-slider {
-    background: var(--color-text-muted);
+    background: var(--text-muted);
     cursor: not-allowed;
 }
 
