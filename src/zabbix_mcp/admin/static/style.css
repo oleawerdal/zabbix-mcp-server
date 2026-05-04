@@ -751,6 +751,36 @@ textarea.input-invalid {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23475569' stroke-width='1.5'%3E%3Ccircle cx='8' cy='8' r='6.5'/%3E%3Cpath d='M5.8 6.2c0-1.2 1-2.2 2.2-2.2s2.2 1 2.2 2.2c0 .9-.5 1.4-1.2 1.8-.7.4-1 .7-1 1.4v.4'/%3E%3Ccircle cx='8' cy='12' r='.6' fill='%23475569' stroke='none'/%3E%3C/svg%3E");
 }
 
+/* Warning sibling of .tooltip-icon - same 16x16 circle, same hover /
+   focus / data-tooltip plumbing, but draws an "!" inside in the
+   warning color so it scans as "this is a warning" instead of
+   "this is informational". Used on the legacy-token row in the
+   /tokens list. Reported 2026-05-04 - the previous "Legacy" badge
+   and the bare "!" character both stuck out next to the rest of
+   the portal's circular help bubbles; a circle-with-! matches
+   the visual weight of the help icons exactly. */
+.warning-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    margin-left: 2px;
+    font-size: 0;
+    line-height: 0;
+    color: transparent;
+    user-select: none;
+    cursor: help;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23d97706' stroke-width='1.5'%3E%3Ccircle cx='8' cy='8' r='6.5'/%3E%3Cpath d='M8 4.5v4'/%3E%3Ccircle cx='8' cy='11.3' r='.6' fill='%23d97706' stroke='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    position: relative;
+}
+.warning-icon:hover,
+.warning-icon:focus {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23b45309' stroke-width='1.5'%3E%3Ccircle cx='8' cy='8' r='6.5'/%3E%3Cpath d='M8 4.5v4'/%3E%3Ccircle cx='8' cy='11.3' r='.6' fill='%23b45309' stroke='none'/%3E%3C/svg%3E");
+}
+
 /* Bulk-delete sticky action bar - appears once 1+ rows on a list
    page are checked. Floats above the table on scroll so the user
    does not lose the Delete button mid-table. */

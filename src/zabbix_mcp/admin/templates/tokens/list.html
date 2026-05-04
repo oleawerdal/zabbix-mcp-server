@@ -69,13 +69,18 @@
                        styled one - reported 2026-05-04 as a glitch. #}
                     <a href="/tokens/{{ token.id }}" class="text-primary" style="font-weight:500;">{{ token.name }}</a>
                     {% if token.is_legacy %}
-                    {# Compact "!" icon instead of a wide "Legacy" pill.
-                       Same warning color, same hover tooltip explaining
-                       the migration. Reported 2026-05-04 - the wide pill
-                       wasted column width that nudged the table into
-                       horizontal scroll on a 1200px screen. #}
-                    <span class="badge badge-warning tooltip-right"
-                          style="margin-left:4px; cursor:pointer; min-width:20px; padding:2px 6px; justify-content:center;"
+                    {# Same shape and visual weight as the rest of the
+                       admin portal's `tooltip-icon` info bubbles, just
+                       in a warning color. Was a "Legacy" badge pill
+                       earlier, then the same pill collapsed to a
+                       single "!" character - reported 2026-05-04 as
+                       still visually inconsistent with the rest of
+                       the portal's `?`-in-circle help icons. The
+                       warning-icon class below renders the same 16x16
+                       circle pattern but in warning yellow with a "!"
+                       glyph, so it scans the same way as a regular
+                       help-icon. #}
+                    <span class="warning-icon"
                           tabindex="0" role="button"
                           aria-label="Legacy token migrated from auth_token"
                           data-tooltip="Legacy: migrated from the legacy auth_token in config.toml. Recommended: create a new token with proper scopes, server restrictions and IP limits, then remove the legacy auth_token from config.">!</span>
