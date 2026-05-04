@@ -521,7 +521,16 @@ a:hover {
 
 /* ---------- Tables ---------- */
 .table-container {
+    /* overflow-x: auto on its own implicitly turns overflow-y from
+       visible into auto (CSS spec - one-axis overflow demands the
+       other be at least auto), which clipped tooltip popups that
+       float above the first row of the table to "invisible".
+       Reported 2026-05-04 - the legacy-token row's warning tooltip
+       did not render. Explicit overflow-y: visible decouples the
+       two axes so x can still scroll on a too-wide table while y
+       lets popups escape the container box. */
     overflow-x: auto;
+    overflow-y: visible;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-color);
     background: var(--bg-card);
@@ -956,14 +965,34 @@ tbody tr:last-child td {
     margin-bottom: 4px;
 }
 
-/* Wide-table polish for the tokens list: compact Actions column.
-   Reported 2026-05-04 - the table was wider than the viewport on
-   a 1200px page; the Actions column with its three Duplicate /
-   Revoke / Delete buttons + the explicit min-width:78px on each
-   button alone took ~250px. Removed the per-button min-width
-   (still readable at natural width 60-70px) and tightened the
-   horizontal padding so three buttons + gaps fit in ~150px.
-   .col-name uses the shared cell-truncate class on the <td>. */
+/* Icon-only buttons. Adds a fixed square hit target so the icon
+   does not jitter when stroke widths differ between SVGs, and
+   keeps hover/focus visuals identical to text buttons. The icon
+   itself stays at currentColor so a btn-danger.btn-icon turns
+   red on hover etc. */
+.btn.btn-icon {
+    padding: 4px 6px;
+    line-height: 0;
+    min-width: auto;
+}
+.btn.btn-icon svg {
+    display: block;
+}
+
+/* Wide-table polish for the tokens list: compact Actions column +
+   Name column max-width override. Reported 2026-05-04 - the table
+   needs to fit a ~960px content area on a 1200px laptop screen
+   without horizontal scroll. The default cell-truncate max-width
+   (240px) is too generous for the Name column when the next nine
+   columns are also competing for room; bring it down to 200px
+   here so a typical token name still reads in full and the
+   long-name edge cases get the same hover-tooltip-with-ellipsis
+   they had at 240px. Actions column drops the per-button
+   min-width and tightens horizontal padding so three buttons +
+   gaps fit naturally. */
+table.tokens-list td.cell-truncate {
+    max-width: 200px;
+}
 table.tokens-list td.col-actions {
     white-space: nowrap;
 }

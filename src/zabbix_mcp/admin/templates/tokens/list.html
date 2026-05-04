@@ -43,8 +43,8 @@
                 <th class="sortable">Prefix{{ _arrows }}</th>
                 <th class="sortable">Scopes{{ _arrows }}</th>
                 <th class="sortable">Servers{{ _arrows }}</th>
-                <th class="sortable">Read-only{{ _arrows }}</th>
-                <th class="sortable">IP Restrictions{{ _arrows }}</th>
+                <th class="sortable" title="Read-only / Read-Write">Mode{{ _arrows }}</th>
+                <th class="sortable" title="Allowed IP ranges">IPs{{ _arrows }}</th>
                 <th class="sortable">Status{{ _arrows }}</th>
                 <th class="sortable">Last Used{{ _arrows }}</th>
                 <th>Actions</th>
@@ -69,18 +69,12 @@
                        styled one - reported 2026-05-04 as a glitch. #}
                     <a href="/tokens/{{ token.id }}" class="text-primary" style="font-weight:500;">{{ token.name }}</a>
                     {% if token.is_legacy %}
-                    {# Same shape and visual weight as the rest of the
-                       admin portal's `tooltip-icon` info bubbles, just
-                       in a warning color. Was a "Legacy" badge pill
-                       earlier, then the same pill collapsed to a
-                       single "!" character - reported 2026-05-04 as
-                       still visually inconsistent with the rest of
-                       the portal's `?`-in-circle help icons. The
-                       warning-icon class below renders the same 16x16
-                       circle pattern but in warning yellow with a "!"
-                       glyph, so it scans the same way as a regular
-                       help-icon. #}
-                    <span class="warning-icon"
+                    {# Compact "!" pill in warning yellow. Visual the
+                       user signed off on, with the tooltip clipping
+                       fix applied to .table-container so the popup
+                       actually shows above the row this time. #}
+                    <span class="badge badge-warning"
+                          style="margin-left:4px; cursor:pointer; min-width:20px; padding:2px 6px; justify-content:center;"
                           tabindex="0" role="button"
                           aria-label="Legacy token migrated from auth_token"
                           data-tooltip="Legacy: migrated from the legacy auth_token in config.toml. Recommended: create a new token with proper scopes, server restrictions and IP limits, then remove the legacy auth_token from config.">!</span>
@@ -130,13 +124,23 @@
                     {% endif %}
                 </td>
                 <td>
+                    {# Compact RO / RW badges with hover tooltip for the
+                       full label. Reported 2026-05-04 - "Read/Write"
+                       was wide enough that the tokens table overflowed
+                       a 1200px viewport. Same color cues. #}
                     {% if token.read_only %}
-                    <span class="badge badge-warning">Read-only</span>
+                    <span class="badge badge-warning"
+                          tabindex="0" role="button"
+                          data-tooltip="Read-only - this token cannot perform create / update / delete operations.">RO</span>
                     {% else %}
-                    <span class="badge badge-muted">Read/Write</span>
+                    <span class="badge badge-muted"
+                          tabindex="0" role="button"
+                          data-tooltip="Read/Write - this token can perform create / update / delete operations.">RW</span>
                     {% endif %}
                     {% if token.allow_raw_json %}
-                    <span class="badge badge-danger tooltip-right" tabindex="0" data-tooltip="This token can call tools with raw_json=true, which strips the prompt-injection mitigation preamble. Only safe for non-LLM clients." style="margin-left:4px;">Raw JSON</span>
+                    <span class="badge badge-danger"
+                          tabindex="0" role="button"
+                          data-tooltip="raw_json - token may call tools with raw_json=true, which strips the prompt-injection mitigation preamble. Only safe for non-LLM clients.">!</span>
                     {% endif %}
                 </td>
                 <td>
@@ -148,32 +152,60 @@
                 </td>
                 <td>
                     {% if token.revoked %}
-                    <span class="badge badge-danger" style="min-width:70px; text-align:center; display:inline-block;">Revoked</span>
+                    <span class="badge badge-danger" style="min-width:54px; text-align:center; display:inline-block;">Revoked</span>
                     {% elif token.is_expired %}
-                    <span class="badge badge-warning" style="min-width:70px; text-align:center; display:inline-block;" title="Expired at {{ token.expires_at }}">Expired</span>
+                    <span class="badge badge-warning" style="min-width:54px; text-align:center; display:inline-block;" title="Expired at {{ token.expires_at }}">Expired</span>
                     {% else %}
-                    <span class="badge badge-success" style="min-width:70px; text-align:center; display:inline-block;">Active</span>
+                    <span class="badge badge-success" style="min-width:54px; text-align:center; display:inline-block;">Active</span>
                     {% endif %}
                 </td>
                 <td class="text-sm text-muted">{{ token.last_used_at or 'Never' }}</td>
                 <td class="col-actions">
                     <div class="actions">
+                        {# Action buttons collapsed to icon-only with
+                           aria-label / title for screen readers and
+                           hover tooltips. Reported 2026-05-04 -
+                           "Duplicate" + "Revoke" / "Activate" text
+                           pushed the column past the viewport on a
+                           1200px screen; swapping to icons brings it
+                           back to ~95px and kills the horizontal
+                           scrollbar. Delete keeps its text since it
+                           is the destructive action and operators
+                           rely on reading the word before they click
+                           it. #}
                         {% if current_user_role != 'viewer' %}
-                        {# Duplicate clones every setting (scopes, allowed_servers,
-                           IP allowlist, expiry, read_only) into the create form
-                           under a "(copy)" name suffix. Operator adjusts and
-                           saves -> brand new id + fresh raw secret. #}
-                        <a href="/tokens/create?duplicate_from={{ token.id | urlencode }}" class="btn btn-ghost btn-sm" title="Clone this token's settings into a new token">Duplicate</a>
+                        <a href="/tokens/create?duplicate_from={{ token.id | urlencode }}"
+                           class="btn btn-ghost btn-sm btn-icon"
+                           title="Duplicate (clone settings into a new token)"
+                           aria-label="Duplicate token">
+                          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                            <rect x="5" y="5" width="9" height="9" rx="1.5"/>
+                            <path d="M5 11H3.5A1.5 1.5 0 0 1 2 9.5v-7A1.5 1.5 0 0 1 3.5 1h7A1.5 1.5 0 0 1 12 2.5V4"/>
+                          </svg>
+                        </a>
                         {% endif %}
                         {% if token.revoked %}
                         <form method="post" action="/tokens/{{ token.id }}/revoke" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <button type="submit" class="btn btn-ghost btn-sm" >Activate</button>
+                            <button type="submit" class="btn btn-ghost btn-sm btn-icon"
+                                    title="Activate token"
+                                    aria-label="Activate token">
+                              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                <path d="M3 8.5l3 3 7-7" stroke-linecap="round" stroke-linejoin="round"/>
+                              </svg>
+                            </button>
                         </form>
                         {% else %}
                         <form method="post" action="/tokens/{{ token.id }}/revoke" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <button type="submit" class="btn btn-ghost btn-sm" >Revoke</button>
+                            <button type="submit" class="btn btn-ghost btn-sm btn-icon"
+                                    title="Revoke token (deactivate without deleting)"
+                                    aria-label="Revoke token">
+                              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                <circle cx="8" cy="8" r="6"/>
+                                <path d="M3.7 3.7l8.6 8.6" stroke-linecap="round"/>
+                              </svg>
+                            </button>
                         </form>
                         {% endif %}
                         <button class="btn btn-danger btn-sm"
