@@ -114,20 +114,28 @@ def _http_get_json(url: str) -> dict:
 
 
 def _http_post_json(url: str, body: dict, headers: dict | None = None) -> tuple[int, dict | str, dict]:
-    import json
+    """POST a JSON body via ``http.client`` (NOT urllib).
+
+    urllib.request silently drops or rewrites the Accept header under
+    some test orderings (we hit it when test_admin's TestRawJsonPolicy
+    runs in the same Python process before this test).  ``http.client``
+    sends headers verbatim, so the streamable-HTTP framing the MCP
+    server expects survives the parent-process state intact.
+    """
+    import http.client, json
+    from urllib.parse import urlparse
+    p = urlparse(url)
+    conn_cls = http.client.HTTPSConnection if p.scheme == "https" else http.client.HTTPConnection
+    conn = conn_cls(p.hostname, p.port, timeout=10)
     data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    # Explicit add_header per key keeps header normalization predictable
-    # across Python versions; the `headers=` kwarg dropped Accept on
-    # Python 3.13 under some test orderings.
-    for k, v in (headers or {}).items():
-        req.add_header(k, v)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, _json_load(resp.read()), dict(resp.headers)
-    except urllib.error.HTTPError as exc:
-        return exc.code, _json_load(exc.read()), dict(exc.headers)
+    out_headers = {"Content-Type": "application/json"}
+    out_headers.update(headers or {})
+    conn.request("POST", p.path or "/", data, out_headers)
+    resp = conn.getresponse()
+    raw = resp.read()
+    hdrs = dict(resp.getheaders())
+    conn.close()
+    return resp.status, _json_load(raw), hdrs
 
 
 def _http_post_form(url: str, body, headers: dict | None = None, follow: bool = False):

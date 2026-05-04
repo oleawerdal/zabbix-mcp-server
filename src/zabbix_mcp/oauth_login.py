@@ -287,9 +287,14 @@ async def handle_oauth_login(
 
 
 def _render_login_form(provider: Any, request: Request) -> Response:
+    import time as _time
     request_id = request.query_params.get("request_id", "")
     pending = provider._pending.get(request_id)
-    if pending is None:
+    if pending is None or pending.expires_at < _time.time():
+        # Pop any expired pending entry on the way out so brute-force
+        # probes against stale request_ids do not pin them in memory.
+        if pending is not None:
+            provider._pending.pop(request_id, None)
         return _render_error_page(
             "This authorization request has expired or was never started. "
             "Reconnect from your MCP client to begin a new login.",

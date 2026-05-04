@@ -211,6 +211,21 @@ class ZmcpOAuthProvider:
 
         # access_token -> refresh_token (so revoke cascades)
         self._access_to_refresh: dict[str, str] = {}
+        # Refresh-token chain bookkeeping for reuse detection (RFC 6819
+        # §5.2.2.3).  Each (client_id, subject) login starts a chain;
+        # rotating the refresh token via /token bumps it forward.  When
+        # an *already-rotated* refresh token is presented, that means
+        # the legitimate client and the attacker each hold a copy and
+        # one of them is replaying - the safest response is to revoke
+        # the entire chain (every access + refresh under that family)
+        # and force the operator to re-authorize.
+        # consumed_refresh_token -> family_id
+        self._consumed_refresh_tokens: OrderedDict[str, str] = OrderedDict()
+        # active_refresh_token -> family_id
+        self._active_refresh_family: dict[str, str] = {}
+        # family_id -> set of token strings (access + refresh) we should
+        # nuke when reuse is detected.
+        self._family_tokens: dict[str, set[str]] = {}
 
     # ------------------------------------------------------------------
     # Pending authorization plumbing (called from our /oauth/login view)
@@ -384,6 +399,16 @@ class ZmcpOAuthProvider:
         client: OAuthClientInformationFull,
         refresh_token: str,
     ) -> RefreshToken | None:
+        # Reuse detection (RFC 6819 §5.2.2.3): if this refresh token has
+        # already been consumed in a previous rotation, somebody is
+        # replaying.  Nuke the entire family (every access + refresh
+        # token derived from the original grant) so the legitimate
+        # client is forced to re-authenticate alongside the attacker.
+        if refresh_token in self._consumed_refresh_tokens:
+            family = self._consumed_refresh_tokens.get(refresh_token)
+            if family is not None:
+                self._revoke_family(family, reason="refresh_token_reuse_detected")
+            return None
         rt = self._refresh_tokens.get(refresh_token)
         if rt is None:
             return None
@@ -405,7 +430,14 @@ class ZmcpOAuthProvider:
         for s in scopes or []:
             if s not in refresh_token.scopes:
                 raise TokenError("invalid_scope", f"scope '{s}' was not in the original grant")
+        # Mark the incoming refresh token as consumed BEFORE minting the
+        # next pair, so a concurrent replay enters the reuse-detection
+        # path in load_refresh_token.
+        family = self._active_refresh_family.pop(refresh_token.token, None)
         self._refresh_tokens.pop(refresh_token.token, None)
+        if family is not None:
+            self._gc(self._consumed_refresh_tokens, _MAX_LIVE_REFRESH_TOKENS)
+            self._consumed_refresh_tokens[refresh_token.token] = family
         # Inherit subject from the previous access token for this refresh,
         # if we still have it; otherwise mark anonymous (the user logged
         # in long enough ago that the AT expired).  Also clear the stale
@@ -429,6 +461,7 @@ class ZmcpOAuthProvider:
             scopes=new_scopes,
             subject=str(subject),
             resource=None,
+            family_id=family,  # rotate within the same family
         )
 
     async def load_access_token(self, token: str) -> AccessToken | None:
@@ -565,6 +598,7 @@ class ZmcpOAuthProvider:
         scopes: list[str],
         subject: str,
         resource: str | None,
+        family_id: str | None = None,
     ) -> OAuthToken:
         now = int(time.time())
         access_str = _new_secret(32)
@@ -591,6 +625,15 @@ class ZmcpOAuthProvider:
         self._refresh_tokens[refresh_str] = refresh
         self._access_to_refresh[access_str] = refresh_str
 
+        # Track the refresh-token family so a stolen-then-replayed token
+        # can be detected (RFC 6819 §5.2.2.3).  A new family_id is minted
+        # at the start of each authorization-code grant; refresh-token
+        # rotation reuses the parent family.
+        if family_id is None:
+            family_id = _new_secret(16)
+        self._active_refresh_family[refresh_str] = family_id
+        self._family_tokens.setdefault(family_id, set()).update({access_str, refresh_str})
+
         return OAuthToken(
             access_token=access_str,
             token_type="Bearer",
@@ -598,6 +641,37 @@ class ZmcpOAuthProvider:
             refresh_token=refresh_str,
             scope=" ".join(scopes) if scopes else None,
         )
+
+    def _revoke_family(self, family_id: str, reason: str) -> int:
+        """Nuke every access + refresh token tied to ``family_id``.
+
+        Returns the count of tokens revoked.  Audited with the supplied
+        ``reason`` so an operator can see "refresh-token reuse detected"
+        rows in the audit log distinct from regular admin-initiated
+        revokes.
+        """
+        tokens = self._family_tokens.pop(family_id, set())
+        n = 0
+        for tok in tokens:
+            if self._access_tokens.pop(tok, None) is not None:
+                n += 1
+            if self._refresh_tokens.pop(tok, None) is not None:
+                n += 1
+            self._access_to_refresh.pop(tok, None)
+            self._active_refresh_family.pop(tok, None)
+        try:
+            from zabbix_mcp.admin.audit_writer import write_audit
+            write_audit(
+                action="oauth.token_family_revoked",
+                user="(automatic)",
+                target_type="oauth_family",
+                target_id=family_id,
+                details={"reason": reason, "tokens_killed": n},
+                ip="",
+            )
+        except Exception:
+            logger.exception("Could not write oauth.token_family_revoked audit row")
+        return n
 
     @staticmethod
     def _gc(table: OrderedDict, limit: int) -> None:
