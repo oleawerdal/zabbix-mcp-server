@@ -68,20 +68,21 @@
                        long-named token did not show the tooltip.
                        Legacy "!" pill stays on the left of the name
                        so the ellipsis cannot eat it. #}
+                    {# tooltip-right on both popups: the Name column sits
+                       at the leftmost edge of the table, so the default
+                       above-and-centered tooltip would flow out past
+                       the page margin / sidebar and be clipped to
+                       invisible. tooltip-right anchors the popup to
+                       the right side of the icon / cell where there
+                       is plenty of room. #}
                     {% if token.is_legacy %}
-                    <span class="badge badge-warning"
+                    <span class="badge badge-warning tooltip-right"
                           style="margin-right:6px; cursor:pointer; min-width:20px; padding:2px 6px; justify-content:center; vertical-align:middle;"
                           tabindex="0" role="button"
                           aria-label="Legacy token migrated from auth_token"
                           data-tooltip="Legacy: migrated from the legacy auth_token in config.toml. Recommended: create a new token with proper scopes, server restrictions and IP limits, then remove the legacy auth_token from config.">!</span>
                     {% endif %}
-                    {# Tooltip lives on the outer .name-cell wrapper so
-                       its ::after popover does not get clipped by the
-                       .name-trunc inner span's overflow:hidden ellipsis
-                       rule. The hover bubble surfaces from the link
-                       up to the wrapper without extra JS - parent
-                       hover state is inherited by the link too. #}
-                    <span class="name-cell" tabindex="0"
+                    <span class="name-cell tooltip-right" tabindex="0"
                           data-tooltip="{{ token.name }}">
                         <span class="name-trunc">
                             <a href="/tokens/{{ token.id }}"
