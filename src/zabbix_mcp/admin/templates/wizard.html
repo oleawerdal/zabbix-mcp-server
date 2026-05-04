@@ -331,6 +331,23 @@
       </a>
     {% endif %}
 
+    {# "Use OAuth instead" card - shown when [oauth].enabled. The user
+       skips the bearer token pick entirely and authenticates via the
+       browser-based OAuth flow in step 4. Card sets token=none with a
+       URL param the view recognises as the OAuth path so step 3 unlocks. #}
+    {% if oauth_enabled %}
+      <a href="?server={{ zabbix_server_name | urlencode }}&token=none{% if client_id %}&client={{ client_id | urlencode }}{% endif %}&auth_mode=oauth#wiz-step-3"
+         class="wiz-card {% if skip_auth and effective_auth_mode == 'oauth' %}selected{% endif %}" style="border-style: dashed; border-color: var(--color-primary);">
+        <div class="wiz-card-title">
+          Use OAuth (browser login)
+          <span class="badge badge-success">OAuth</span>
+        </div>
+        <div class="wiz-card-info">
+          Skip the bearer token. Each operator signs in to <code>/oauth/login</code> with their own admin-portal user; the client receives an access token automatically. Available because <code>[oauth].enabled = true</code> in <code>config.toml</code>. Pick this if your client is Claude Desktop or ChatGPT.
+        </div>
+      </a>
+    {% endif %}
+
     {% for t in tokens %}
       <a href="?server={{ zabbix_server_name | urlencode }}&token={{ t.id | urlencode }}{% if client_id %}&client={{ client_id | urlencode }}{% endif %}#wiz-step-3"
          class="wiz-card {% if selected_token and selected_token.id == t.id %}selected{% endif %} {% if t.revoked %}disabled{% endif %}">
@@ -423,6 +440,32 @@
     <span class="tooltip-icon" tabindex="0" data-tooltip="Paste this snippet into your client's config file (path shown to the right) and restart the client. The token is shown ONCE here - you must paste it now since old tokens cannot be retrieved later (only the hash is stored).">&#x1F6C8;</span>
   </div>
 
+  {# Auth mode picker if the client supports both AND the server has
+     [oauth].enabled. Bearer mode pastes a static token; OAuth mode
+     surfaces the URL only and the client runs the browser-based
+     authorize flow on its own. When the server has OAuth off, or the
+     client only supports one mode, this row is hidden. #}
+  {% if auth_mode_choices | length > 1 %}
+  <div style="margin-bottom: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+    <span class="text-sm text-muted">Authentication:</span>
+    {% for mode in auth_mode_choices %}
+      {% set is_active = (effective_auth_mode == mode) %}
+      <a href="?server={{ zabbix_server_name | urlencode }}&token={{ token_id | urlencode }}&client={{ client_id | urlencode }}&transport={{ transport }}{% if os_choice %}&os={{ os_choice | urlencode }}{% endif %}{% if url_ctx.host and url_ctx.host != url_ctx.raw_host %}&override_host={{ url_ctx.host | urlencode }}{% endif %}&auth_mode={{ mode }}#wiz-step-4"
+         class="badge {% if is_active %}badge-success{% else %}badge-muted{% endif %}"
+         style="text-decoration: none; padding: 4px 10px;">
+        {% if mode == "bearer" %}Bearer token{% else %}OAuth (browser login){% endif %}
+      </a>
+    {% endfor %}
+    <span class="text-sm text-muted">
+      {% if effective_auth_mode == "oauth" %}
+        - the client opens <code>{{ url_ctx.url }}/oauth/login</code> in a browser, no token to paste.
+      {% else %}
+        - paste a static <code>zmcp_...</code> token below; client sends it as <code>Authorization: Bearer</code>.
+      {% endif %}
+    </span>
+  </div>
+  {% endif %}
+
   {# Transport picker if the client supports more than one. We mark the
      transport that the running MCP server is actually serving as
      "Detected" - that's the one clients will need. The others render as
@@ -497,12 +540,22 @@
      long bearer tokens have room to breathe without crushing the left
      column. Hidden when the user picked "Continue without token" - the
      snippet/curl are already auth-free so there's nothing to substitute. #}
-  {% if not skip_auth %}
+  {% if effective_auth_mode == "oauth" %}
+  <div class="wiz-token-box" style="background: var(--color-primary-light); border-color: var(--color-primary);">
+    <strong>OAuth flow - no token to paste</strong>
+    <div class="wiz-token-help" style="margin-top: 6px;">
+      The client redirects the operator's browser to <code>{{ url_ctx.url }}/oauth/login</code>. The operator signs in with their Zabbix MCP <a href="/users" style="color: inherit; text-decoration: underline;">admin-portal account</a> and clicks <em>Sign in &amp; allow</em> - the client receives an access token automatically. Each operator gets their own login; there is no shared bearer to rotate.
+    </div>
+  </div>
+  {% elif selected_token or auth_enabled %}
   <div class="wiz-token-box">
     <label for="wiz-token-field">Paste your bearer token here</label>
     <input type="text" id="wiz-token-field" class="form-input" placeholder="zmcp_..." style="margin-top: 6px; width: 100%;" autocomplete="off" spellcheck="false">
     <div class="wiz-token-help">
       The examples below will be filled in with this value. We <strong>cannot</strong> show you an existing token - only a hash is stored - so paste the raw <code>zmcp_...</code> you copied when you created the token. Nothing is sent to the server; it lives only in this browser tab.
+      {% if not selected_token and oauth_enabled %}
+      <div style="margin-top: 8px;"><strong>Tip:</strong> you have not picked a token in step 2. Either go back and pick one, or switch to <a href="?server={{ zabbix_server_name | urlencode }}&token=none&client={{ client_id | urlencode }}&auth_mode=oauth#wiz-step-4" style="color: inherit; text-decoration: underline;">OAuth (browser login)</a> above.</div>
+      {% endif %}
     </div>
   </div>
   {% endif %}

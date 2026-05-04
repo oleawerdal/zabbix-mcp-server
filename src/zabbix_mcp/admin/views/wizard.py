@@ -283,10 +283,20 @@ def _render_snippet(
     transport: str,
     url: str,
     token: str,
+    auth_mode: str = "bearer",
 ) -> str:
-    """Render the per-client config snippet."""
+    """Render the per-client config snippet for the chosen auth mode.
+
+    For ``auth_mode == "oauth"`` we look up ``oauth_template`` first
+    and fall back to the bearer template if the client did not declare
+    one (which means the OAuth flow surfaces nothing client-specific
+    beyond the URL itself).
+    """
+    tmpl_str = client_meta.get("template", "")
+    if auth_mode == "oauth":
+        tmpl_str = client_meta.get("oauth_template") or tmpl_str
     try:
-        return Template(client_meta["template"]).render(
+        return Template(tmpl_str).render(
             server_key=server_key,
             transport=transport,
             url=url,
@@ -301,14 +311,21 @@ def _render_instructions(
     client_meta: dict,
     server_key: str,
     config_path: str,
+    auth_mode: str = "bearer",
 ) -> list[str]:
     """Render the install instructions, substituting {config_path} and
     {server_key} placeholders. Uses str.replace (not str.format) so
     instruction text can safely contain other curly braces - e.g. the
     Codex tip mentions ``${ZABBIX_MCP_TOKEN}`` and the JSON template
-    samples shown inline."""
+    samples shown inline.
+
+    For ``auth_mode == "oauth"`` falls back to ``oauth_instructions``
+    when the client provides them; otherwise reuses the bearer steps.
+    """
+    steps_key = "oauth_instructions" if auth_mode == "oauth" else "instructions"
+    steps = client_meta.get(steps_key) or client_meta.get("instructions", [])
     out: list[str] = []
-    for step in client_meta.get("instructions", []):
+    for step in steps:
         rendered = step.replace("{config_path}", config_path).replace("{server_key}", server_key)
         out.append(rendered)
     return out
@@ -329,6 +346,13 @@ async def wizard_view(request: Request) -> Response:
     transport = qp.get("transport") or ""
     override_host = _safe_host_override(qp.get("override_host") or "")
     os_choice = qp.get("os") or ""
+    auth_mode = (qp.get("auth_mode") or "").lower()  # "bearer" | "oauth" | ""
+
+    # OAuth feature flag from server config: drives whether the wizard
+    # offers the OAuth path at all. When [oauth].enabled is False the
+    # wizard always lands on the legacy bearer flow even if a client
+    # nominally supports OAuth - there is nothing for it to talk to.
+    oauth_enabled = bool(getattr(admin_app.config.oauth, "enabled", False))
 
     # Step 1: servers
     servers = _get_servers(admin_app)
@@ -345,10 +369,12 @@ async def wizard_view(request: Request) -> Response:
         or bool(admin_app.config.server.auth_token)
     )
     # Sentinel "none" token_id means the operator explicitly chose to
-    # skip auth for the generated snippet (valid only when auth_enabled
-    # is False). Handling it as a sentinel keeps the URL bookmarkable
-    # and uses the same query-string plumbing as real token IDs.
-    skip_auth = (token_id == "none") and not auth_enabled
+    # skip the bearer token. Valid in two cases:
+    #   1. the server has no auth at all (legacy "Continue without token"),
+    #   2. [oauth].enabled is True and the operator picked the OAuth path.
+    # Handling it as a sentinel keeps the URL bookmarkable and uses the
+    # same query-string plumbing as real token IDs.
+    skip_auth = (token_id == "none") and (not auth_enabled or oauth_enabled)
     selected_token = None
     if token_id and not skip_auth:
         selected_token = next((t for t in tokens if t["id"] == token_id), None)
@@ -379,6 +405,31 @@ async def wizard_view(request: Request) -> Response:
     # server will need to use the detected transport unless the operator
     # restarts with a different one.
     server_transport = (admin_app.config.server.transport or "http").lower()
+
+    # Resolve the auth mode for the picked client. A client lists which
+    # modes it actually supports (default ["bearer"]); the wizard surfaces
+    # OAuth only when the server has [oauth].enabled AND the client lists
+    # "oauth" in its auth_modes. The default falls back to bearer so a
+    # bookmark from before the OAuth feature still renders correctly.
+    client_auth_modes: list[str] = ["bearer"]
+    effective_auth_mode = "bearer"
+    auth_mode_choices: list[str] = []
+    if selected_client:
+        client_auth_modes = list(selected_client.get("auth_modes") or ["bearer"])
+        offered = ["oauth"] if oauth_enabled else []
+        offered = [m for m in client_auth_modes if m == "bearer" or m in offered]
+        if not offered:
+            offered = ["bearer"]
+        auth_mode_choices = offered
+        # Pick what the user asked for; otherwise default to OAuth when
+        # the server has it enabled (it is the lower-friction path), or
+        # fall back to bearer.
+        if auth_mode in offered:
+            effective_auth_mode = auth_mode
+        elif "oauth" in offered:
+            effective_auth_mode = "oauth"
+        else:
+            effective_auth_mode = "bearer"
 
     # Step 4: URL composition + snippet (only when client is chosen)
     url_ctx: dict = {}
@@ -412,18 +463,28 @@ async def wizard_view(request: Request) -> Response:
         # user picked "Continue without token". All per-client Jinja2
         # templates guard the Authorization header with {% if token %},
         # so empty token -> snippet without auth header.
-        snippet_token = "" if skip_auth else "YOUR_TOKEN_HERE"
+        # OAuth flow does not paste a token at all; the client gets one
+        # via the browser-based authorize step. Bearer flow keeps the
+        # YOUR_TOKEN_HERE placeholder JS swaps out client-side.
+        if effective_auth_mode == "oauth":
+            snippet_token = ""
+        elif skip_auth:
+            snippet_token = ""
+        else:
+            snippet_token = "YOUR_TOKEN_HERE"
         snippet = _render_snippet(
             selected_client,
             server_key=server_name or "zabbix",
             transport=effective_transport,
             url=url_ctx.get("url", ""),
             token=snippet_token,
+            auth_mode=effective_auth_mode,
         )
         instructions = _render_instructions(
             selected_client,
             server_key=server_name or "zabbix",
             config_path=config_path_display,
+            auth_mode=effective_auth_mode,
         )
 
     # Build the return_to URL for token creation chain
@@ -464,6 +525,11 @@ async def wizard_view(request: Request) -> Response:
         "config_path_display": config_path_display,
         "os_choice": os_choice,
         "notes": (selected_client or {}).get("notes", ""),
+        # Step 4 OAuth/Bearer toggle
+        "oauth_enabled": oauth_enabled,
+        "client_auth_modes": client_auth_modes,
+        "auth_mode_choices": auth_mode_choices,
+        "effective_auth_mode": effective_auth_mode,
         # Permissions
         "can_create_token": session.role in ("admin", "operator"),
     })

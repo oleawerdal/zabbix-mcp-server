@@ -28,12 +28,27 @@ Each entry shape::
       "format":       "json" | "toml" | "cli" | "text",
       "transports":   list of supported MCP transports (subset of
                       ["http", "sse", "stdio"]),
+      "auth_modes":   list of supported authentication modes:
+                          "bearer" -> static Authorization: Bearer header
+                                      (the legacy [tokens.X] flow),
+                          "oauth"  -> RFC 6749 / OAuth 2.1 with auto-discovery
+                                      from the server's /.well-known/ docs.
+                      Most clients support only ["bearer"]; ChatGPT and the
+                      Claude Desktop Custom Connector UI also accept OAuth
+                      (auto-discovery), so they list both.
       "config_paths": dict of OS -> file path where the snippet goes
                       (or {"cli": "<command>"} for CLI-only clients),
-      "template":     Jinja2 template string rendered with context:
+      "template":     Jinja2 template string for the *bearer* auth mode,
+                      rendered with context:
                           server_key, transport, url, token, host, port
                       (token may be empty - template should handle that),
-      "instructions": list of ordered steps shown next to the snippet,
+      "oauth_template":     OPTIONAL Jinja2 template rendered when the user
+                      picks oauth mode in the wizard.  Receives the same
+                      context as ``template`` minus ``token``.  Falls back
+                      to ``template`` when not present.
+      "instructions": list of ordered steps for the bearer auth mode,
+      "oauth_instructions": OPTIONAL list of steps for the oauth auth mode.
+                      Falls back to ``instructions`` when not present.
       "notes":        optional caveats (HTTPS requirement, OS-specific
                       gotchas, etc.),
     }
@@ -52,16 +67,15 @@ CLIENTS: dict[str, dict] = {
     "claude-desktop": {
         "name": "Claude Desktop",
         "vendor": "Anthropic",
-        # JSON config via mcp-remote wrapper - this is the ONLY way to
-        # connect Claude Desktop to a Bearer-authenticated remote MCP
-        # server. The in-app "Custom Connectors" UI (Settings -> Customize
-        # -> Connectors -> + Add custom connector) only accepts OAuth 2.0
-        # (Client ID + Client Secret); it will not accept a raw
-        # Authorization: Bearer header. mcp-remote is a local stdio
-        # wrapper that forwards calls to the remote HTTP MCP endpoint and
-        # injects the header for us.
+        # JSON config via mcp-remote wrapper for the Bearer auth mode.
+        # The in-app Custom Connectors UI also exists and supports OAuth
+        # 2.0 with auto-discovery -- that is the OAuth mode below. The
+        # Bearer mode survives because it works without [oauth].enabled
+        # and runs entirely client-side via mcp-remote's local stdio
+        # wrapper (no public HTTPS required).
         "format": "json",
         "transports": ["http", "sse"],
+        "auth_modes": ["bearer", "oauth"],
         "config_paths": {
             "macos": "~/Library/Application Support/Claude/claude_desktop_config.json",
             "windows": "%APPDATA%\\Claude\\claude_desktop_config.json",
@@ -87,9 +101,19 @@ CLIENTS: dict[str, dict] = {
             "Open `{config_path}` in a text editor (create it if it does not exist).",
             "Paste the snippet on the right; if the file already has `mcpServers`, merge the `{server_key}` entry into the existing object.",
             "Save and start Claude Desktop again. The Zabbix tools appear in the tools menu of a new chat.",
-            "Alternative (OAuth-backed servers only): Settings -> Customize -> Connectors -> + -> Add custom connector with the URL and OAuth Client ID/Secret. This path does NOT work with Bearer-token auth.",
         ],
-        "notes": "Bearer-token remote MCP servers like this one go through the `mcp-remote` local wrapper (https://github.com/geelen/mcp-remote) - the in-app Custom Connectors UI only accepts OAuth 2.0 Client ID / Secret, not Bearer. For Bearer tokens, edit `claude_desktop_config.json` as shown. Publicly-trusted HTTPS is recommended but not strictly required when using mcp-remote (the wrapper runs on your local machine). For local stdio MCP servers, use the `command` + `args` shape directly without mcp-remote.",
+        "oauth_template": """URL: {{ url }}
+
+(no JSON file edit needed for OAuth - everything happens in the Claude Desktop UI)""",
+        "oauth_instructions": [
+            "Open Claude Desktop -> Settings -> Customize -> Connectors.",
+            "Click + Add custom connector.",
+            "Paste the URL on the right into the Server URL field.",
+            "Authentication: pick OAuth (Claude Desktop discovers everything else from the server's /.well-known/oauth-authorization-server).",
+            "Click Connect. A browser window opens at /oauth/login. Sign in with your Zabbix MCP admin user and click Sign in & allow.",
+            "When the browser shows the success page, return to Claude Desktop. The connector flips to Connected and Zabbix tools appear in a new chat.",
+        ],
+        "notes": "Two integration paths: (1) Bearer + mcp-remote wrapper - works on a LAN-only deployment, no public HTTPS required, but every operator pastes the same shared token. (2) OAuth via Custom Connectors UI - per-operator login against the admin-portal users, but the server must be reachable over HTTPS at [server].public_url. Pick based on whether you want shared-secret simplicity or named-user accountability.",
     },
     "claude-code": {
         "name": "Claude Code (CLI)",
@@ -143,6 +167,7 @@ http_headers = { Authorization = "Bearer {{ token }}" }
         "vendor": "OpenAI",
         "format": "text",
         "transports": ["http", "sse"],
+        "auth_modes": ["bearer", "oauth"],
         "config_paths": {
             "web": "ChatGPT Settings -> Apps & Connectors -> Advanced settings -> Developer mode",
         },
@@ -160,7 +185,24 @@ Auth header:   Authorization: Bearer {{ token }}{% endif %}""",
             "  - Authentication: Bearer token - paste the token value",
             "Save. The Zabbix tools appear in the chat tool menu.",
         ],
-        "notes": "ChatGPT MCP requires a publicly-trusted HTTPS endpoint - OpenAI's cloud brokers the connection, plain HTTP and self-signed certs are rejected. Use a public HTTPS tunnel (Cloudflare Tunnel / Tailscale Funnel / ngrok) if your MCP server is behind a firewall. Note: ChatGPT's implementation is stricter than Claude / Codex - some MCP servers that work everywhere else can fail here.",
+        "oauth_template": """Name:          {{ server_key }}
+URL:           {{ url }}
+Authentication: OAuth
+(no token to paste - ChatGPT auto-discovers from {{ url }}/.well-known/oauth-authorization-server)""",
+        "oauth_instructions": [
+            "Open ChatGPT Settings (you need a Plus / Pro / Business / Enterprise / Edu plan).",
+            "Go to Apps & Connectors -> Advanced settings.",
+            "Toggle Developer mode on.",
+            "Click + Create and fill in:",
+            "  - Name: `{server_key}`",
+            "  - MCP server URL: the URL on the right",
+            "  - Authentication: pick OAuth.",
+            "ChatGPT shows Advanced OAuth settings - leave it on auto-discover (do not paste any client_id manually).",
+            "Click Save / Connect. ChatGPT opens a browser tab at /oauth/login on your MCP server.",
+            "Sign in with your Zabbix MCP admin user and click Sign in & allow.",
+            "Return to ChatGPT - the connector is now linked. Zabbix tools appear in the chat tool menu.",
+        ],
+        "notes": "ChatGPT MCP requires a publicly-trusted HTTPS endpoint - OpenAI's cloud brokers the connection, plain HTTP and self-signed certs are rejected. OAuth mode is the cleaner path on production: per-operator login against the admin-portal users, no shared bearer token to rotate. Bearer mode still works when [oauth].enabled is off or when you do not want browser-based login.",
     },
     # =====================================================================
     # IDEs
@@ -445,6 +487,7 @@ Auth header:   Authorization: Bearer {{ token }}{% endif %}""",
         "vendor": "",
         "format": "text",
         "transports": ["http", "sse", "stdio"],
+        "auth_modes": ["bearer", "oauth"],
         "config_paths": {
             "any": "Refer to your client's MCP documentation.",
         },
@@ -456,9 +499,31 @@ Auth header:   Authorization: Bearer {{ token }}{% endif %}""",
             "Use the URL and authentication header from the snippet on the right.",
             "Most MCP clients accept a server URL and optional `Authorization` header.",
         ],
+        "oauth_template": """URL:                {{ url }}
+Authentication:     OAuth 2.1 (RFC 8414 / RFC 9728 auto-discovery)
+Authorization srv:  {{ url }}/.well-known/oauth-authorization-server
+Resource metadata:  {{ url }}/.well-known/oauth-protected-resource
+Authorize:          {{ url }}/authorize
+Token:              {{ url }}/token
+Register:           {{ url }}/register   (RFC 7591 dynamic registration)""",
+        "oauth_instructions": [
+            "If your client supports MCP 2025-11-25 OAuth auto-discovery (Claude Desktop, ChatGPT, MCP Inspector), just paste the URL on the right. The client reads the .well-known endpoints and runs the flow on its own.",
+            "If your client wants endpoints by hand, copy the values from the snippet on the right into its OAuth settings.",
+            "Login is browser-based: the client opens /oauth/login, you sign in with the admin-portal credentials, the browser is redirected back to the client with an access token.",
+        ],
         "notes": "If your specific client is not listed, this generic config has the essentials. The Model Context Protocol specification (https://modelcontextprotocol.io) defines the standard - any compliant client follows it.",
     },
 }
+
+
+# Tool-id catalog of clients that the wizard can route through the
+# OAuth flow. Computed lazily so adding a client is one dict edit.
+def clients_supporting_oauth() -> list[str]:
+    """Return the ids of clients whose ``auth_modes`` includes ``"oauth"``."""
+    return [
+        cid for cid, meta in CLIENTS.items()
+        if "oauth" in (meta.get("auth_modes") or ["bearer"])
+    ]
 
 
 def get_client(client_id: str) -> dict | None:
