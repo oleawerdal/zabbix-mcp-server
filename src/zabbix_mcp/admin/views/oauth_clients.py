@@ -133,6 +133,33 @@ async def oauth_clients_list(request: Request) -> Response:
     })
 
 
+_SCOPE_DESCRIPTIONS: dict[str, str] = {
+    "*":               "Full access to every tool (read + write).",
+    "monitoring":      "Read live state: hosts, problems, items, triggers, history, graphs.",
+    "data_collection": "Read templates, value maps, dashboards.",
+    "alerts":          "Read action definitions, alerts, media types, scripts.",
+    "users":           "Read or modify Zabbix users, groups, roles, MFA. High privilege.",
+    "administration":  "Read or modify housekeeping, proxies, audit log, server settings. High privilege.",
+    "extensions":      "Server-side analytics: graph_render, anomaly_detect, capacity_forecast, problem_active_get, report_generate, health_check.",
+}
+
+
+def _scope_catalog(active_scopes: list[str]) -> list[dict]:
+    """Build the per-scope checkbox catalog for the detail page."""
+    from zabbix_mcp.config import TOOL_GROUPS
+    rows: list[dict] = []
+    active_set = set(active_scopes or [])
+    for sid in ["*"] + list(TOOL_GROUPS.keys()):
+        rows.append({
+            "id": sid,
+            "label": "Full access (all tools)" if sid == "*" else sid.replace("_", " ").title(),
+            "description": _SCOPE_DESCRIPTIONS.get(sid, "Tool group."),
+            "checked": sid in active_set,
+            "is_wildcard": sid == "*",
+        })
+    return rows
+
+
 async def oauth_client_detail(request: Request) -> Response:
     """GET /oauth-clients/<id> -- single registered client."""
     admin_app = request.app.state.admin_app
@@ -148,12 +175,87 @@ async def oauth_client_detail(request: Request) -> Response:
             "/oauth-clients", "OAuth client not found.", flash_type="warning",
         )
 
+    active_scopes = (client["scope"] or "").split() or ["*"]
     return admin_app.render("oauth_clients/detail.html", request, {
         "active": "oauth-clients",
         "page_title": f"OAuth Client: {client['name']}",
         "client": client,
+        "scope_catalog": _scope_catalog(active_scopes),
+        "can_edit": session.role in ("admin", "operator"),
         "can_revoke": session.role in ("admin", "operator"),
     })
+
+
+async def oauth_client_scope_update(request: Request) -> Response:
+    """POST /oauth-clients/<id>/scope -- replace the client's scope grant."""
+    admin_app = request.app.state.admin_app
+    session = admin_app.require_auth(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+    if session.role not in ("admin", "operator"):
+        return admin_app.flash_redirect(
+            f"/oauth-clients/{request.path_params.get('client_id', '')}",
+            "You do not have permission to edit OAuth client scopes.",
+            flash_type="danger",
+        )
+
+    client_id = request.path_params.get("client_id", "")
+    if not TOMLKIT_AVAILABLE:
+        return admin_app.flash_redirect(
+            "/oauth-clients",
+            "Config writer unavailable; cannot edit OAuth client scopes.",
+            flash_type="danger",
+        )
+
+    form = await request.form()
+    scopes = [s for s in form.getlist("scope") if s]
+    if not scopes:
+        return admin_app.flash_redirect(
+            f"/oauth-clients/{client_id}",
+            "Pick at least one scope (or revoke the client to remove it entirely).",
+            flash_type="warning",
+        )
+
+    # Mutate the in-memory provider client so the next /authorize from
+    # this client uses the new scope. Updating just config.toml without
+    # this would require a full server restart.
+    provider = admin_app.oauth_provider
+    if provider is not None:
+        ci = provider._clients.get(client_id)
+        if ci is not None:
+            ci.scope = " ".join(scopes)
+
+    # Persist to config so the change survives restart.
+    try:
+        from zabbix_mcp.admin.config_writer import (
+            load_config_document, save_config_document,
+        )
+        doc = load_config_document(admin_app.config_path)
+        section = doc.get("oauth_clients", {})
+        if client_id in section:
+            section[client_id]["scope"] = " ".join(scopes)
+            save_config_document(admin_app.config_path, doc)
+    except Exception as exc:
+        logger.warning("Could not persist scope change for %s: %s", client_id, exc)
+        return admin_app.flash_redirect(
+            f"/oauth-clients/{client_id}",
+            f"Failed to write scope change to config: {exc}",
+            flash_type="danger",
+        )
+
+    write_audit(
+        action="oauth_client.scope_update",
+        user=session.username,
+        target_type="oauth_client",
+        target_id=client_id,
+        details={"new_scope": " ".join(scopes)},
+        ip=request.client.host if request.client else "",
+    )
+    return admin_app.flash_redirect(
+        f"/oauth-clients/{client_id}",
+        f"Scope updated to: {' '.join(scopes)}.",
+        flash_type="success",
+    )
 
 
 async def oauth_client_revoke(request: Request) -> Response:

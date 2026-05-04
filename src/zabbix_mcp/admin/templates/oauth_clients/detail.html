@@ -77,12 +77,37 @@
 <div class="card" style="margin-top: 16px;">
     <h3 class="card-title">
         Granted scope
-        <span class="tooltip-icon" tabindex="0" data-tooltip="Scope string the client requested at registration. The actual per-session grant comes from the operator clicking 'Sign in &amp; allow' on /oauth/login - the operator's admin role decides what tools the issued token can call, regardless of what the client asks for here.">&#x1F6C8;</span>
+        <span class="tooltip-icon" tabindex="0" data-tooltip="Tool groups the client may request at /authorize. Operator can narrow / widen this without revoking the client. Active sessions keep the scopes they were minted with; the change applies to the next /authorize the client runs.">&#x1F6C8;</span>
     </h3>
+    {% if can_edit %}
+    <form method="post" action="/oauth-clients/{{ client.id | urlencode }}/scope">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="text-sm text-muted" style="margin-bottom: 10px;">
+            Tick the scopes the client may request. Existing access tokens stay
+            valid until they expire - revoke the client to invalidate them
+            immediately.
+        </div>
+        {% for s in scope_catalog %}
+        <label style="display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); margin-bottom: 6px; background: var(--bg-input); {% if s.is_wildcard %}border-color: var(--color-warning); background: var(--color-warning-light);{% endif %}">
+            <input type="checkbox" name="scope" value="{{ s.id }}" {% if s.checked %}checked{% endif %} style="width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; accent-color: var(--color-primary);">
+            <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 600;">
+                    {{ s.label }}
+                    {% if s.is_wildcard %}<span class="badge badge-warning" style="margin-left: 6px;">unlimited</span>{% endif %}
+                    <code style="margin-left: 6px; font-size: 0.78rem;">{{ s.id }}</code>
+                </div>
+                <div class="text-sm text-muted" style="margin-top: 2px;">{{ s.description }}</div>
+            </div>
+        </label>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Save scope</button>
+    </form>
+    {% else %}
     {% if client.scope %}
     <code>{{ client.scope }}</code>
     {% else %}
-    <span class="text-muted">none specified at registration (the operator chooses scope at login time).</span>
+    <span class="text-muted">none specified.</span>
+    {% endif %}
     {% endif %}
 </div>
 
