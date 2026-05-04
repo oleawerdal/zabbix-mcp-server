@@ -37,13 +37,25 @@ We will acknowledge your report within 48 hours and work with you on a fix.
 ### Admin Portal Security
 
 - Session-based authentication with scrypt password hashing (n=16384, r=8, p=1)
-- Session cookies: `HttpOnly`, `SameSite=Strict`, `Secure` (on HTTPS) — prevents XSS and CSRF
+- Session cookies: `HttpOnly`, `SameSite=Strict`, `Secure` (on HTTPS) - prevents XSS and CSRF
 - Login rate limiting: 5 attempts per 5 minutes per IP, 30-second lockout
 - POST rate limiting: 30 requests per minute per session
 - Password policy: minimum 10 characters, at least one uppercase letter and one digit
 - Role-based access control: admin (full), operator (tokens/templates), viewer (read-only)
-- Jinja2 autoescape enabled on all templates — prevents XSS
+- Jinja2 autoescape enabled on all templates - prevents XSS
 - Config write-back uses atomic file operations with `threading.RLock`
+
+### OAuth 2.1 Authorization Server (v1.28+)
+
+- Authorization Code grant + PKCE S256 (mandatory; non-PKCE clients refused at startup)
+- RFC 8707 audience binding: every issued access token's `aud` is bound to `[server].public_url`; tokens issued for one MCP deployment cannot be replayed against another
+- Dynamic client registration (RFC 7591) - off via `[oauth].dynamic_registration_enabled = false` if you do not want untrusted callers registering clients
+- Login rate limit on `/oauth/login`: 5 failed attempts per IP per 5-minute rolling window (parity with admin portal `/login`)
+- Login uses the existing `[admin.users.*]` table (scrypt-hashed) - no second identity store
+- Authorization codes are one-shot, 10-minute TTL, in-memory
+- Refresh tokens rotated on each use (OAuth 2.1 §4.3.1)
+- Issuer URL must be HTTPS for non-localhost bindings (RFC 8414); the framework refuses to start otherwise
+- Full setup walkthrough including reverse-proxy patterns (Apache, Nginx, Caddy) in [`docs/OAUTH.md`](docs/OAUTH.md)
 
 ### Network Security
 
@@ -104,11 +116,11 @@ When `public_url`, `allowed_origins`, and `allowed_hosts` are all unset on a non
 
 | Version | Supported |
 |---|---|
-| 1.27 (latest) | Yes |
+| 1.28 (latest) | Yes |
+| 1.27 | Yes |
 | 1.26 | Yes |
 | 1.25 | Yes |
 | 1.24 | Yes |
 | 1.23 | Yes |
 | 1.22 | Yes |
-| 1.21 | Yes |
-| < 1.21 | No |
+| < 1.22 | No |

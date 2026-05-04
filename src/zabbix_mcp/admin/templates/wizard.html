@@ -411,7 +411,7 @@
 
   <div class="wiz-cards">
     {% for cid, c in clients %}
-      <a href="?server={{ zabbix_server_name | urlencode }}&token={{ token_id | urlencode }}&client={{ cid | urlencode }}#wiz-step-4"
+      <a href="?server={{ zabbix_server_name | urlencode }}&token={{ token_id | urlencode }}&client={{ cid | urlencode }}{% if effective_auth_mode %}&auth_mode={{ effective_auth_mode }}{% endif %}#wiz-step-4"
          class="wiz-card {% if client_id == cid %}selected{% endif %}">
         <div class="wiz-card-title">
           {{ c.name }}

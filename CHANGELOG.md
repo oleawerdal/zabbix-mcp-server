@@ -1,6 +1,8 @@
 # Changelog
 
-## v1.28 - unreleased
+## v1.28 - 2026-05-04
+
+OAuth 2.1 release. Three issues land together (#36, #38, #39) plus a full audit-trail of UI polish and security hardening discovered along the way. The headline change is the embedded OAuth 2.1 authorization server: ChatGPT custom apps, Claude Desktop remote connectors, MCP Inspector, and any MCP 2025-11-25 compliant client can now negotiate auth against a Zabbix MCP deployment without an external IdP, without a hardcoded bearer, and without operators learning OAuth library internals.
 
 ### Added
 

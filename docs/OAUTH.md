@@ -75,13 +75,127 @@ For production you have two equally good options:
    trusted_proxies = ["127.0.0.1"]
    ```
 
-   Caddy snippet:
+   The same setup works behind any HTTPS-terminating reverse proxy.
+   Three battle-tested snippets follow - pick the one matching your
+   stack. All three forward `/mcp`, `/authorize`, `/token`, `/register`,
+   `/revoke`, `/oauth/login`, `/static/*`, and `/.well-known/*` to the
+   single MCP backend port. If you also want the admin portal exposed
+   under the same hostname, proxy a second backend on a different
+   `Location` / `location` / matcher - see "Admin portal under the
+   same hostname" below.
+
+   **Caddy** (Let's Encrypt automatic):
 
    ```caddy
    mcp.example.com {
-     reverse_proxy 127.0.0.1:8080
+       reverse_proxy 127.0.0.1:8080
    }
    ```
+
+   **Nginx** (TLS terminator):
+
+   ```nginx
+   server {
+       listen 443 ssl http2;
+       server_name mcp.example.com;
+
+       ssl_certificate     /etc/letsencrypt/live/mcp.example.com/fullchain.pem;
+       ssl_certificate_key /etc/letsencrypt/live/mcp.example.com/privkey.pem;
+       include /etc/letsencrypt/options-ssl-nginx.conf;
+
+       # Streamable-HTTP MCP framing keeps a connection open for SSE
+       # responses, so disable buffering and bump the read timeout.
+       proxy_buffering off;
+       proxy_read_timeout 600s;
+       proxy_http_version 1.1;
+       proxy_set_header Connection "";
+
+       proxy_set_header Host              $host;
+       proxy_set_header X-Real-IP         $remote_addr;
+       proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+
+       location / {
+           proxy_pass http://127.0.0.1:8080;
+       }
+   }
+
+   # Optional: redirect HTTP -> HTTPS
+   server {
+       listen 80;
+       server_name mcp.example.com;
+       return 301 https://$host$request_uri;
+   }
+   ```
+
+   **Apache** (`mod_ssl` + `mod_proxy_http`):
+
+   ```apache
+   <VirtualHost *:443>
+       ServerName mcp.example.com
+
+       SSLEngine on
+       SSLCertificateFile    /etc/letsencrypt/live/mcp.example.com/fullchain.pem
+       SSLCertificateKeyFile /etc/letsencrypt/live/mcp.example.com/privkey.pem
+       Include /etc/letsencrypt/options-ssl-apache.conf
+
+       ProxyPreserveHost On
+       ProxyTimeout 600
+       RequestHeader set X-Forwarded-Proto "https"
+
+       ProxyPass        / http://127.0.0.1:8080/
+       ProxyPassReverse / http://127.0.0.1:8080/
+   </VirtualHost>
+
+   <VirtualHost *:80>
+       ServerName mcp.example.com
+       Redirect permanent / https://mcp.example.com/
+   </VirtualHost>
+   ```
+
+   You will need `mod_proxy`, `mod_proxy_http`, `mod_ssl`, and
+   `mod_headers` loaded; on Rocky / RHEL run `dnf install mod_ssl`
+   if missing (mod_proxy / mod_proxy_http / mod_headers ship with the
+   base `httpd` package - enable them via `LoadModule` lines under
+   `/etc/httpd/conf.modules.d/`).
+
+   Whichever proxy you pick, set `[server].trusted_proxies = ["127.0.0.1"]`
+   (or your proxy's IP) in `config.toml` so the OAuth login rate
+   limiter and token IP allowlists honour the `X-Forwarded-For` the
+   proxy injects.
+
+### Admin portal under the same hostname
+
+If you want to expose the admin portal alongside the MCP endpoint
+behind the same TLS hostname (typical for small deployments), add a
+second backend route. The admin portal listens on a separate port
+(`[admin].port`, default `9090`) so the proxy just routes by path.
+
+   **Nginx** - admin under `/admin/`:
+
+   ```nginx
+   location /admin/ {
+       proxy_pass http://127.0.0.1:9090/;
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-Proto https;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   }
+   ```
+
+   **Apache** - admin under `/admin/`:
+
+   ```apache
+   <Location /admin/>
+       ProxyPass        http://127.0.0.1:9090/
+       ProxyPassReverse http://127.0.0.1:9090/
+   </Location>
+   ```
+
+   The admin portal does not currently rewrite asset URLs by prefix,
+   so a path-mounted admin portal expects to be served from the
+   document root. If you need a sub-path mount, use a separate
+   hostname instead (`admin.example.com`) and a second `<VirtualHost>`
+   / `server { ... }` block proxying `/` to `127.0.0.1:9090`.
 
 Either way, hit `https://mcp.example.com/.well-known/oauth-authorization-server`
 from a browser - if you get JSON with HTTP 200, ChatGPT and Claude
