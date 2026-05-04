@@ -910,19 +910,20 @@ tbody tr:last-child td {
     line-height: 1.6;
 }
 
-/* Adjacent badges in a sequence (token scopes / allowed_servers /
-   read-only + raw-json combo, ...) get a small horizontal gap so
-   they do not visually merge into one wide pill on the rare
-   browsers / fonts where the inline-flex margin defaults to 0.
-   Vertical margin matches so a column with several scope chips
-   (token edit page or any wrap-friendly container) gets a real
-   row gap instead of the chips stacking touching one another -
-   reported 2026-05-04 on /tokens. */
+/* Per-badge spacing using right + bottom margins (NOT left margins).
+   Adjacent-sibling left margins create a visible indent on the
+   second and third badges when the chip row wraps onto a new line:
+   the wrapped badge keeps its margin-left even though there is no
+   sibling to the left of it any more, so the new row appears
+   shifted to the right by the gap value. Reported 2026-05-04 on
+   /tokens scopes column. Right + bottom margin is the standard
+   "trailing gap" pattern - the wrap happens cleanly because the
+   next chip starts at column 0 with no left margin to push it.
+   The very last badge in a row has a stray margin-right but the
+   td padding eats it; visually invisible. */
 .badge {
+    margin-right: 4px;
     margin-bottom: 4px;
-}
-.badge + .badge {
-    margin-left: 4px;
 }
 
 /* Wide-table polish for the tokens list: compact Actions column.
