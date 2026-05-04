@@ -22,7 +22,10 @@
 </div>
 
 <div class="card">
-    <h3 class="card-title">Identity</h3>
+    <h3 class="card-title">
+        Identity
+        <span class="tooltip-icon" tabindex="0" data-tooltip="Client metadata stored in [oauth_clients.<id>] in config.toml. Persists across server restart; only revoke removes it.">&#x1F6C8;</span>
+    </h3>
     <table class="data-table" style="margin-top: 10px;">
         <tbody>
             <tr>
@@ -53,7 +56,10 @@
 </div>
 
 <div class="card" style="margin-top: 16px;">
-    <h3 class="card-title">Redirect URIs ({{ client.redirect_uris | length }})</h3>
+    <h3 class="card-title">
+        Redirect URIs ({{ client.redirect_uris | length }})
+        <span class="tooltip-icon" tabindex="0" data-tooltip="OAuth-spec exact match: only these URIs may receive the authorization code. Anything else returns invalid_redirect_uri at /authorize. Set at registration time and immutable from this UI - revoke + re-register the client to change them.">&#x1F6C8;</span>
+    </h3>
     <div class="text-sm text-muted" style="margin-bottom: 8px;">
         OAuth-spec exact match: a token will be issued only when the client redirects the user-agent to one of these exact URIs.
     </div>
@@ -69,7 +75,10 @@
 </div>
 
 <div class="card" style="margin-top: 16px;">
-    <h3 class="card-title">Granted scope</h3>
+    <h3 class="card-title">
+        Granted scope
+        <span class="tooltip-icon" tabindex="0" data-tooltip="Scope string the client requested at registration. The actual per-session grant comes from the operator clicking 'Sign in &amp; allow' on /oauth/login - the operator's admin role decides what tools the issued token can call, regardless of what the client asks for here.">&#x1F6C8;</span>
+    </h3>
     {% if client.scope %}
     <code>{{ client.scope }}</code>
     {% else %}
@@ -78,7 +87,10 @@
 </div>
 
 <div class="card" style="margin-top: 16px;">
-    <h3 class="card-title">Live tokens</h3>
+    <h3 class="card-title">
+        Live tokens
+        <span class="tooltip-icon" tabindex="0" data-tooltip="Access tokens (1h TTL) and refresh tokens (30-day TTL, rotated on each use) currently held in memory for this client. Server restart drops them; clients then re-auth via the refresh-token rotation flow or trigger a fresh /oauth/login.">&#x1F6C8;</span>
+    </h3>
     <div class="text-sm text-muted" style="margin-bottom: 8px;">
         Tokens currently held in memory by the running MCP server. Server restart drops these (clients re-authenticate via refresh or fresh login).
     </div>
@@ -97,7 +109,10 @@
 </div>
 
 <div class="card" style="margin-top: 16px;">
-    <h3 class="card-title">Grant types</h3>
+    <h3 class="card-title">
+        Grant types
+        <span class="tooltip-icon" tabindex="0" data-tooltip="Which OAuth 2.1 grant types this client is allowed to use at /token. authorization_code is the browser flow, refresh_token rotates expired access tokens.">&#x1F6C8;</span>
+    </h3>
     {% if client.grant_types %}
     {% for gt in client.grant_types %}
     <code style="margin-right: 6px;">{{ gt }}</code>

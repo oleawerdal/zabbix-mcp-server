@@ -28,7 +28,10 @@
 {% else %}
 
 <div class="card" style="margin-bottom: 16px;">
-    <h3 class="card-title">Discovery</h3>
+    <h3 class="card-title">
+        Discovery
+        <span class="tooltip-icon" tabindex="0" data-tooltip="MCP clients (ChatGPT, Claude Desktop, MCP Inspector) probe these well-known URLs to find your OAuth server before they ever ask for a login. If they 404 here, the client cannot register and the connector handshake fails before the user is even prompted.">&#x1F6C8;</span>
+    </h3>
     <div class="text-sm text-muted">
         Clients auto-discover this server's OAuth endpoints via the well-known URLs. If a client cannot reach these, it cannot register or authenticate.
     </div>
@@ -59,7 +62,10 @@
 </div>
 
 <div class="card">
-    <h3 class="card-title">Registered clients ({{ clients | length }})</h3>
+    <h3 class="card-title">
+        Registered clients ({{ clients | length }})
+        <span class="tooltip-icon" tabindex="0" data-tooltip="Every third-party MCP client that completed RFC 7591 dynamic registration against this server. Each entry is a public client (PKCE-only, no shared secret). Revoking a row deletes the registration AND drops every access/refresh token the client currently holds, so the next request from it gets 401 and the operator has to log in again.">&#x1F6C8;</span>
+    </h3>
 
     {% if not clients %}
     <p class="text-muted" style="margin-top: 8px;">
@@ -70,12 +76,12 @@
         <table class="data-table" style="margin-top: 10px;">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Client ID</th>
-                    <th>Redirect URIs</th>
-                    <th>Auth method</th>
-                    <th>Active tokens</th>
-                    <th>Registered</th>
+                    <th>Name <span class="tooltip-icon" tabindex="0" data-tooltip="Client name supplied during registration (e.g. 'ChatGPT', 'Claude Desktop'). Cosmetic - the OAuth grant is keyed by client_id, not by name.">&#x1F6C8;</span></th>
+                    <th>Client ID <span class="tooltip-icon" tabindex="0" data-tooltip="UUID minted by this server when the client called POST /register. The client carries it on every /token + /authorize request.">&#x1F6C8;</span></th>
+                    <th>Redirect URIs <span class="tooltip-icon" tabindex="0" data-tooltip="Exact-match callbacks the client may receive the authorization code on. Any other URI is rejected at /authorize. Set during registration.">&#x1F6C8;</span></th>
+                    <th>Auth method <span class="tooltip-icon" tabindex="0" data-tooltip="public (PKCE) = no client_secret, the client proves itself with PKCE on /token. client_secret_post / basic = confidential client with a shared secret. Set during registration.">&#x1F6C8;</span></th>
+                    <th>Active tokens <span class="tooltip-icon" tabindex="0" data-tooltip="Access + refresh tokens currently held in memory by the running MCP server for this client. Counts go to zero on server restart (clients re-auth via refresh or fresh login).">&#x1F6C8;</span></th>
+                    <th>Registered <span class="tooltip-icon" tabindex="0" data-tooltip="When the client first called POST /register. Persists in [oauth_clients.X] across restarts.">&#x1F6C8;</span></th>
                     {% if can_revoke %}<th>Actions</th>{% endif %}
                 </tr>
             </thead>
