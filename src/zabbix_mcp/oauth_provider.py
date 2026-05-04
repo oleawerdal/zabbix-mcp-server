@@ -294,6 +294,28 @@ class ZmcpOAuthProvider:
             client_info.client_name,
             [str(u) for u in (client_info.redirect_uris or [])],
         )
+        # Audit-log the registration so the operator has a paper trail of
+        # which clients dynamically registered themselves and when.  RFC
+        # 7591 lets any caller register; without an audit row, an operator
+        # has no way to spot a malicious registration after the fact.
+        try:
+            from zabbix_mcp.admin.audit_writer import write_audit
+            from zabbix_mcp.token_store import current_client_ip
+            write_audit(
+                action="oauth.client_register",
+                user="(dynamic registration)",
+                target_type="oauth_client",
+                target_id=str(client_info.client_id or ""),
+                details={
+                    "client_name": client_info.client_name or "",
+                    "redirect_uris": [str(u) for u in (client_info.redirect_uris or [])],
+                    "token_endpoint_auth_method": client_info.token_endpoint_auth_method or "none",
+                    "scope": client_info.scope or "",
+                },
+                ip=current_client_ip.get() or "",
+            )
+        except Exception:
+            logger.exception("Could not write oauth.client_register audit row")
 
     async def authorize(
         self,
@@ -476,9 +498,13 @@ class ZmcpOAuthProvider:
         if isinstance(token, AccessToken):
             access_str = token.token
             refresh_str = self._access_to_refresh.pop(access_str, None)
+            client_id = token.client_id
+            kind = "access_token"
         else:
             refresh_str = token.token
             access_str = None
+            client_id = token.client_id
+            kind = "refresh_token"
             for a, r in list(self._access_to_refresh.items()):
                 if r == refresh_str:
                     access_str = a
@@ -489,6 +515,22 @@ class ZmcpOAuthProvider:
             self._access_tokens.pop(access_str, None)
         if refresh_str is not None:
             self._refresh_tokens.pop(refresh_str, None)
+        # Audit the client-initiated revocation.  Per-revoke audit lets an
+        # operator see when a client signed itself out vs. when an admin
+        # nuked the registration from /oauth-clients.
+        try:
+            from zabbix_mcp.admin.audit_writer import write_audit
+            from zabbix_mcp.token_store import current_client_ip
+            write_audit(
+                action="oauth.token_revoked_by_client",
+                user="(oauth client)",
+                target_type="oauth_client",
+                target_id=str(client_id or ""),
+                details={"token_type_hint": kind},
+                ip=current_client_ip.get() or "",
+            )
+        except Exception:
+            logger.exception("Could not write oauth.token_revoked_by_client audit row")
 
     # ------------------------------------------------------------------
     # Internals

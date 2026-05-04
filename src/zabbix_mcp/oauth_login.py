@@ -193,8 +193,18 @@ async def handle_oauth_login(
             "MCP client to begin a new login.",
         )
 
+    from zabbix_mcp.admin.audit_writer import write_audit
+
     if not _verify_admin_user(config, username, password):
         _oauth_login_limiter.record_attempt(client_ip)
+        write_audit(
+            action="oauth.login_failed",
+            user=username or "(empty)",
+            target_type="oauth_client",
+            target_id=str(pending.client.client_id or ""),
+            details={"client_name": pending.client.client_name or "", "reason": "invalid_credentials"},
+            ip=client_ip or "",
+        )
         client_name = (pending.client.client_name or "").strip() or str(pending.client.client_id or "")
         return HTMLResponse(_render_template(
             "oauth_login.html",
@@ -215,6 +225,14 @@ async def handle_oauth_login(
             "This authorization request has expired between submission and "
             "completion. Reconnect from your MCP client to begin a new login.",
         )
+    write_audit(
+        action="oauth.login_success",
+        user=username,
+        target_type="oauth_client",
+        target_id=str(pending.client.client_id or ""),
+        details={"client_name": pending.client.client_name or "", "scopes": granted_scopes},
+        ip=client_ip or "",
+    )
     logger.info(
         "OAuth login granted: user=%s client=%s scopes=%s",
         username,

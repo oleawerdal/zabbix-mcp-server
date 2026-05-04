@@ -116,10 +116,13 @@ def _http_get_json(url: str) -> dict:
 def _http_post_json(url: str, body: dict, headers: dict | None = None) -> tuple[int, dict | str, dict]:
     import json
     data = json.dumps(body).encode()
-    req = urllib.request.Request(
-        url, data=data, method="POST",
-        headers={"Content-Type": "application/json", **(headers or {})},
-    )
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    # Explicit add_header per key keeps header normalization predictable
+    # across Python versions; the `headers=` kwarg dropped Accept on
+    # Python 3.13 under some test orderings.
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status, _json_load(resp.read()), dict(resp.headers)
