@@ -186,8 +186,18 @@ class UpdateChecker:
             return {"ok": False, "reason": "disabled", **self.to_context()}
         # Serialize concurrent force-checks. If another check is
         # already running (login-triggered or earlier "Check now")
-        # we wait for it instead of double-polling.
+        # we wait for it, then re-check whether last_checked has
+        # advanced under the lock - if so we reuse that result instead
+        # of issuing a duplicate GitHub poll. This prevents a burst of
+        # button presses (or a login + button press) from doubling the
+        # outbound traffic past the public 60 req/h/IP rate limit.
+        import time as _time
+        entered_at = _time.time()
         with self._busy:
+            if self.last_checked is not None and self.last_checked >= entered_at:
+                # Another thread polled while we were waiting on the
+                # lock - the result is fresh enough, skip the duplicate.
+                return {"ok": True, "reused_in_flight": True, **self.to_context()}
             try:
                 self._check()
             except Exception as exc:

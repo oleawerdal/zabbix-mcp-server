@@ -281,6 +281,14 @@ def build_args(tool_name: str, suite: Suite):
         }
     if n == "item_threshold_search":
         return {"search": {"key_": "system.cpu"}, "lastvalue_ge": 0, "result_limit": 2}
+    if n == "host_status_get":
+        return {"host_id": s.get("hostid")} if s.get("hostid") else _SKIP("no smoke hostid available")
+    if n == "hostgroup_overview_get":
+        return {"groupid": s.get("groupid"), "top_n": 3} if s.get("groupid") else _SKIP("no smoke groupid available")
+    if n == "infrastructure_summary_get":
+        return {"top_n": 3}
+    if n == "item_history_summary_get":
+        return {"itemid": s.get("itemid"), "period": "1h", "limit": 50} if s.get("itemid") else _SKIP("no smoke itemid available")
     if n == "report_generate":
         return {"report_type": "availability", "hostgroupid": s.get("groupid"), "period": "7d"} if s.get("groupid") else None
     if n == "action_prepare":

@@ -1970,10 +1970,10 @@ do_request_tls() {
                 webroot="${webroot:-/var/www/letsencrypt}"
                 mkdir -p "$webroot"
             fi
-            info "Detected another service on :80 — using certbot webroot mode (--webroot $webroot)"
+            info "Detected another service on :80 - using certbot webroot mode (--webroot $webroot)"
         else
             mode="standalone"
-            info "Port :80 is free — using certbot standalone mode"
+            info "Port :80 is free - using certbot standalone mode"
         fi
     fi
 

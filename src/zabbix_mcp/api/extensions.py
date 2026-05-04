@@ -1209,9 +1209,16 @@ def infrastructure_summary_get(
                 return 0
 
         host_count = _count("host.get")
-        host_enabled = _count("host.get") and len(
-            client_manager.call(server_name, "host.get", {"output": ["hostid"], "filter": {"status": 0}})
-        ) or 0
+        # Enabled hosts only - status=0 in Zabbix means monitored.
+        # countOutput is faster than fetching the hostid list and len().
+        try:
+            v = client_manager.call(server_name, "host.get", {
+                "output": "count",
+                "filter": {"status": 0},
+            })
+            host_enabled = int(v) if isinstance(v, (int, str)) else 0
+        except Exception:
+            host_enabled = 0
         item_count = _count("item.get")
         trigger_count = _count("trigger.get")
         template_count = _count("template.get")
