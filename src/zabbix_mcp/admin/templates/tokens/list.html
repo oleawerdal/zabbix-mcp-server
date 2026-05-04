@@ -30,7 +30,7 @@
 {% endif %}
 
 <div class="table-container">
-    <table>
+    <table class="tokens-list">
         <thead>
             <tr>
                 {% if current_user_role != 'viewer' %}
@@ -69,15 +69,44 @@
                     <code class="monospace">{{ token.token_prefix }}</code>
                 </td>
                 <td>
-                    {% for s in token.scopes %}
-                    <span class="badge badge-{% if s == '*' %}success{% else %}primary{% endif %}">{% if s == '*' %}* (all){% else %}{{ s }}{% endif %}</span>
-                    {% endfor %}
+                    {# Scopes: sort alphabetically, show the first 3 inline,
+                       collapse the rest into a "+N more" muted badge with
+                       a hover tooltip listing the full set. The wildcard
+                       "*" token is always shown alone (it implies the full
+                       set), so the truncation only kicks in for explicit
+                       multi-scope tokens. #}
+                    {% set sorted_scopes = token.scopes | sort %}
+                    {% if '*' in sorted_scopes %}
+                        <span class="badge badge-success">* (all)</span>
+                    {% elif sorted_scopes | length <= 2 %}
+                        {% for s in sorted_scopes %}
+                        <span class="badge badge-primary">{{ s }}</span>
+                        {% endfor %}
+                    {% else %}
+                        {% for s in sorted_scopes[:2] %}
+                        <span class="badge badge-primary">{{ s }}</span>
+                        {% endfor %}
+                        <span class="badge badge-muted tooltip-right" tabindex="0" role="button" data-tooltip="{{ sorted_scopes | join(', ') }}">+{{ sorted_scopes | length - 2 }} more</span>
+                    {% endif %}
                 </td>
                 <td>
+                    {# Same alphabetical-3-then-collapse pattern for the
+                       allowed_servers list. Operators with fleet-wide
+                       tokens often have a long list here. #}
                     {% set servers = token.allowed_servers if token.allowed_servers else ['*'] %}
-                    {% for s in servers %}
-                    <span class="badge badge-{% if s == '*' %}success{% else %}primary{% endif %}">{% if s == '*' %}* (all){% else %}{{ s }}{% endif %}</span>
-                    {% endfor %}
+                    {% set sorted_servers = servers | sort %}
+                    {% if '*' in sorted_servers %}
+                        <span class="badge badge-success">* (all)</span>
+                    {% elif sorted_servers | length <= 2 %}
+                        {% for s in sorted_servers %}
+                        <span class="badge badge-primary">{{ s }}</span>
+                        {% endfor %}
+                    {% else %}
+                        {% for s in sorted_servers[:2] %}
+                        <span class="badge badge-primary">{{ s }}</span>
+                        {% endfor %}
+                        <span class="badge badge-muted tooltip-right" tabindex="0" role="button" data-tooltip="{{ sorted_servers | join(', ') }}">+{{ sorted_servers | length - 2 }} more</span>
+                    {% endif %}
                 </td>
                 <td>
                     {% if token.read_only %}
@@ -106,7 +135,7 @@
                     {% endif %}
                 </td>
                 <td class="text-sm text-muted">{{ token.last_used_at or 'Never' }}</td>
-                <td>
+                <td class="col-actions">
                     <div class="actions">
                         {% if current_user_role != 'viewer' %}
                         {# Duplicate clones every setting (scopes, allowed_servers,
@@ -118,12 +147,12 @@
                         {% if token.revoked %}
                         <form method="post" action="/tokens/{{ token.id }}/revoke" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <button type="submit" class="btn btn-ghost btn-sm" style="min-width:78px;">Activate</button>
+                            <button type="submit" class="btn btn-ghost btn-sm" >Activate</button>
                         </form>
                         {% else %}
                         <form method="post" action="/tokens/{{ token.id }}/revoke" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <button type="submit" class="btn btn-ghost btn-sm" style="min-width:78px;">Revoke</button>
+                            <button type="submit" class="btn btn-ghost btn-sm" >Revoke</button>
                         </form>
                         {% endif %}
                         <button class="btn btn-danger btn-sm"
