@@ -17,12 +17,77 @@
 
 {% if not oauth_enabled %}
 <div class="card">
-    <h3 class="card-title">OAuth is not enabled</h3>
+    <h3 class="card-title">
+        OAuth is not enabled
+        <span class="tooltip-icon" tabindex="0" data-tooltip="The embedded OAuth 2.1 authorization server is the auth layer ChatGPT custom apps and Claude Desktop remote connectors expect. Until it is enabled, those clients see a 404 on .well-known/oauth-authorization-server and bail out before they can even prompt for login.">&#x1F6C8;</span>
+    </h3>
     <p class="text-muted" style="margin-top: 8px;">
-        OAuth dynamic client registration is off in <code>config.toml</code>. To accept OAuth-discovering clients (ChatGPT, Claude Desktop), set <code>[oauth].enabled = true</code> and <code>[server].public_url</code> to your externally-reachable HTTPS URL, then restart the server.
+        Turn on the embedded OAuth 2.1 authorization server so MCP clients that auto-discover authentication (ChatGPT custom apps, Claude Desktop remote, MCP Inspector) can sign in against this deployment. Login uses the existing admin-portal users; no separate identity store.
     </p>
-    <p class="text-muted" style="margin-top: 8px;">
-        Full setup walkthrough in <a href="https://github.com/initMAX/zabbix-mcp-server/blob/main/docs/OAUTH.md" target="_blank">docs/OAUTH.md</a>.
+
+    {% if can_enable %}
+    <form method="post" action="/oauth-clients/enable" style="margin-top: 16px;" onsubmit="return validateOauthEnable(this);">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <div class="form-group">
+            <label for="oauth-public-url">
+                Public URL
+                <span class="tooltip-icon" tabindex="0" data-tooltip="The externally-reachable HTTPS URL for this server. MCP clients use it to find the OAuth endpoints and to redirect operators back after login. Must be https:// (HTTP is rejected by ChatGPT/Claude). For testing, http://localhost:PORT is allowed. If the server runs behind a reverse proxy, this is the proxy's public URL, NOT 127.0.0.1.">&#x1F6C8;</span>
+            </label>
+            <input type="url" id="oauth-public-url" name="public_url" class="form-input"
+                   value="{{ public_url }}"
+                   placeholder="https://mcp.example.com"
+                   required
+                   pattern="^(https://[^\s]+|http://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(/.*)?)$"
+                   title="Must be https:// (HTTP allowed only for localhost / 127.0.0.1).">
+            <div class="form-hint" style="margin-top: 4px;">
+                Must be <strong>https://</strong>. The setting is also writable in <a href="/settings#mcp-server">Settings &rarr; MCP Server &rarr; Public URL</a>. No HTTPS yet? Run <code>sudo ./deploy/install.sh request-tls --hostname mcp.example.com</code> on the server to get a Let's Encrypt cert in one command.
+            </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 12px;">
+            <label class="checkbox-label">
+                <input type="checkbox" name="dynamic_registration_enabled" checked>
+                Allow dynamic client registration (RFC 7591)
+                <span class="tooltip-icon" tabindex="0" data-tooltip="When checked, any MCP client can POST /register to add itself - this is what ChatGPT and Claude Desktop expect out-of-the-box. Uncheck if you want to lock the AS down to clients you manually pre-register in [oauth_clients.*]; new clients then get a 403 on /register and the operator has to add them by hand.">&#x1F6C8;</span>
+            </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
+            Enable OAuth &amp; save
+        </button>
+        <p class="text-muted text-sm" style="margin-top: 8px;">
+            The setting takes effect after the server restarts. The <strong>Restart needed</strong> badge appears in the page header once you save - click it to apply.
+        </p>
+    </form>
+    <script>
+    function validateOauthEnable(form) {
+        var url = form.public_url.value.trim();
+        if (!url) {
+            alert('Public URL is required.');
+            return false;
+        }
+        var u;
+        try { u = new URL(url); } catch (e) {
+            alert('Public URL is not a valid URL: ' + e.message);
+            return false;
+        }
+        var isLocal = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1';
+        if (u.protocol !== 'https:' && !isLocal) {
+            alert('Public URL must use https://. OAuth over plain HTTP is rejected by ChatGPT and Claude Desktop.\n\nGot: ' + u.protocol + '//' + u.hostname);
+            return false;
+        }
+        return true;
+    }
+    </script>
+    {% else %}
+    <p class="text-muted" style="margin-top: 16px;">
+        Only the <strong>admin</strong> role can change OAuth settings. Ask an admin to enable it, or edit <code>config.toml</code> on the server: set <code>[oauth].enabled = true</code> and <code>[server].public_url</code> to your externally-reachable HTTPS URL, then restart.
+    </p>
+    {% endif %}
+
+    <p class="text-muted text-sm" style="margin-top: 16px;">
+        Full walkthrough (TLS options, reverse-proxy snippets, role caps, refresh-token reuse detection) in <a href="https://github.com/initMAX/zabbix-mcp-server/blob/main/docs/OAUTH.md" target="_blank">docs/OAUTH.md</a>.
     </p>
 </div>
 {% else %}

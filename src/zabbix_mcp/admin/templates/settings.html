@@ -331,12 +331,23 @@
     <form method="post" action="/settings/admin">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="_cfg_mtime" value="{{ config_mtime | default('') }}">
-        {# Removed the "Enable admin portal" toggle from this UI:
-           letting an admin disable the portal from inside the portal
-           is a textbook foot-gun (lock yourself out, then have to SSH
-           in and edit config.toml). To disable, set
-           [admin].enabled = false in config.toml directly and restart.
-           #}
+        <div class="settings-row">
+            <div class="settings-label">
+                Admin Portal <span class="tooltip-icon" tabindex="0" data-tooltip="Whether [admin].enabled is true in config.toml. The toggle is read-only here on purpose: disabling the admin portal from inside the admin portal would lock you out and force you to SSH in and edit config.toml to recover. To disable, edit /etc/zabbix-mcp/config.toml on the server, set [admin].enabled = false, then restart the service.">&#x1F6C8;</span>
+            </div>
+            <div>
+                <label class="toggle-label" style="opacity: 0.85; cursor: not-allowed;">
+                    <span class="toggle">
+                        <input type="checkbox" checked disabled>
+                        <span class="toggle-slider"></span>
+                    </span>
+                    Enabled (config-only)
+                </label>
+                <div class="form-hint">
+                    The portal is on - that's how you got here. Toggling it off from this UI is intentionally blocked because it would lock you out. To disable: SSH to the server, set <code>[admin].enabled = false</code> in <code>/etc/zabbix-mcp/config.toml</code>, then <code>sudo systemctl restart zabbix-mcp-server</code>.
+                </div>
+            </div>
+        </div>
         <div class="settings-row">
             <div class="settings-label">
                 Admin Port <span class="tooltip-icon" tabindex="0" data-tooltip="Separate port for the admin portal you are using right now. Default 9090. Picking the same port as MCP would collide. Restart required to apply.">&#x1F6C8;</span>
@@ -351,7 +362,7 @@
             </div>
         </div>
         <div class="settings-row">
-            <div class="settings-label">Check for updates <span class="tooltip-icon" tabindex="0" data-tooltip="Polls the GitHub releases API once an hour. When a newer stable tag is found, an 'Update vX.Y available' pill appears in the top bar. Disable for fully air-gapped deployments.">&#x1F6C8;</span></div>
+            <div class="settings-label">Check for updates <span class="tooltip-icon" tabindex="0" data-tooltip="Polls the GitHub releases API at server boot, on every successful admin login (throttled to one poll per 60 sec to avoid rate-limit), and on demand via the 'Check now' button next to the version pill. When a newer stable tag is found, an 'Update vX.Y available' pill appears in the top bar. Disable for fully air-gapped deployments.">&#x1F6C8;</span></div>
             <div>
                 <label class="toggle-label">
                     <span class="toggle">
@@ -360,7 +371,7 @@
                     </span>
                     Notify me when a newer version is released
                 </label>
-                <div class="form-hint">When on, this server pings the GitHub releases API once an hour and shows an &ldquo;Update vX.Y available&rdquo; banner in the top bar. Outbound HTTPS to <code>api.github.com</code>; no other data leaves the server. Off-line / restricted networks should disable this.</div>
+                <div class="form-hint">When on, this server pings the GitHub releases API at boot, after every successful admin login (throttled to once per 60 sec), and on demand via the &ldquo;Check now&rdquo; button next to the version pill. Shows an &ldquo;Update vX.Y available&rdquo; banner in the top bar when a newer release lands. Outbound HTTPS to <code>api.github.com</code>; no other data leaves the server. Off-line / restricted networks should disable this.</div>
             </div>
         </div>
         {% if current_user_role != 'viewer' %}

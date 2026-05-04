@@ -133,6 +133,7 @@ async def oauth_clients_list(request: Request) -> Response:
         "clients": clients,
         "public_url": (getattr(admin_app.config.server, "public_url", "") or "").rstrip("/"),
         "can_revoke": session.role in ("admin", "operator"),
+        "can_enable": session.role == "admin",
     })
 
 
@@ -396,6 +397,109 @@ async def oauth_client_settings_update(request: Request) -> Response:
     return admin_app.flash_redirect(
         f"/oauth-clients/{client_id}",
         "Client settings updated.",
+        flash_type="success",
+    )
+
+
+async def oauth_enable(request: Request) -> Response:
+    """POST /oauth-clients/enable -- one-click switch to flip
+    [oauth].enabled on plus set [server].public_url, used when the
+    operator lands on the empty-state page and would otherwise have
+    to hand-edit config.toml. Validates that public_url is HTTPS
+    because OAuth over HTTP is not interoperable - ChatGPT custom
+    apps and Claude Desktop both refuse plain-HTTP discovery URLs.
+    """
+    admin_app = request.app.state.admin_app
+    session = admin_app.require_auth(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+    if session.role != "admin":
+        return admin_app.flash_redirect(
+            "/oauth-clients",
+            "Only the admin role can change OAuth settings.",
+            flash_type="danger",
+        )
+    if not TOMLKIT_AVAILABLE:
+        return admin_app.flash_redirect(
+            "/oauth-clients",
+            "Cannot edit config: tomlkit not installed.",
+            flash_type="danger",
+        )
+
+    form = await request.form()
+    public_url = str(form.get("public_url", "") or "").strip().rstrip("/")
+    dynamic_reg = "dynamic_registration_enabled" in form
+
+    # MUST be HTTPS - OAuth discovery over HTTP fails on every modern
+    # MCP client (ChatGPT, Claude Desktop, MCP Inspector all reject
+    # cleartext metadata). Localhost gets a pass for dev / smoke loops.
+    from urllib.parse import urlparse
+    if not public_url:
+        return admin_app.flash_redirect(
+            "/oauth-clients",
+            "public_url is required - set it to the externally-reachable URL clients will use to reach this server.",
+            flash_type="danger",
+        )
+    parsed = urlparse(public_url)
+    is_localhost = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+    if parsed.scheme != "https" and not is_localhost:
+        return admin_app.flash_redirect(
+            "/oauth-clients",
+            f"public_url must use https:// (got {parsed.scheme!r}). OAuth over plain HTTP is rejected by every modern MCP client. Use the install.sh request-tls subcommand for an automatic Let's Encrypt cert, or terminate TLS in a reverse proxy and point public_url at the proxy URL.",
+            flash_type="danger",
+        )
+    if not parsed.hostname:
+        return admin_app.flash_redirect(
+            "/oauth-clients",
+            "public_url has no hostname. Use the form 'https://mcp.example.com' or 'https://mcp.example.com:8080'.",
+            flash_type="danger",
+        )
+
+    try:
+        from zabbix_mcp.admin.config_writer import (
+            load_config_document, save_config_document,
+        )
+        import tomlkit
+        doc = load_config_document(admin_app.config_path)
+
+        # [server].public_url
+        srv = doc.get("server")
+        if srv is None:
+            srv = tomlkit.table()
+            doc["server"] = srv
+        srv["public_url"] = public_url
+
+        # [oauth].enabled = true (+ optional dynamic_registration_enabled)
+        oauth = doc.get("oauth")
+        if oauth is None:
+            oauth = tomlkit.table()
+            doc["oauth"] = oauth
+        oauth["enabled"] = True
+        oauth["dynamic_registration_enabled"] = dynamic_reg
+
+        save_config_document(admin_app.config_path, doc)
+    except Exception as exc:
+        logger.exception("oauth_enable: failed to write config")
+        return admin_app.flash_redirect(
+            "/oauth-clients",
+            f"Could not save config: {exc}",
+            flash_type="danger",
+        )
+
+    write_audit(
+        "oauth.enable",
+        user=session.username,
+        details={"public_url": public_url, "dynamic_registration_enabled": dynamic_reg},
+        ip=request.client.host if request.client else "unknown",
+    )
+
+    # The provider boots from config at startup, so the change only
+    # takes effect after the operator restarts the service. Surface
+    # that explicitly instead of pretending it just works.
+    admin_app.restart_needed = True
+    return admin_app.flash_redirect(
+        "/oauth-clients",
+        f"OAuth enabled. Restart the server to activate: sudo systemctl restart zabbix-mcp-server (or click the 'Restart needed' badge in the header).",
         flash_type="success",
     )
 
