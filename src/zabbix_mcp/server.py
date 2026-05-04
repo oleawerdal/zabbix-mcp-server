@@ -2364,10 +2364,26 @@ def run_server(
                 raw = doc.get("oauth_clients", {}) or {}
                 out: dict[str, Any] = {}
                 for cid, body in raw.items():
+                    body = dict(body)
+                    # Lift our own extension fields off the raw dict before
+                    # handing it to the framework's pydantic model (which
+                    # rejects unknown keys).  Stored back as private
+                    # attributes the provider reads off the client object.
+                    allowed_ips = body.pop("allowed_ips", None) or []
+                    access_ttl = body.pop("access_token_ttl_seconds", None)
+                    refresh_ttl = body.pop("refresh_token_ttl_seconds", None)
                     try:
-                        out[cid] = OAuthClientInformationFull.model_validate(dict(body))
+                        ci = OAuthClientInformationFull.model_validate(body)
                     except Exception as exc:
                         logger.warning("Skipping malformed [oauth_clients.%s]: %s", cid, exc)
+                        continue
+                    if allowed_ips:
+                        object.__setattr__(ci, "_allowed_ips", list(allowed_ips))
+                    if access_ttl:
+                        object.__setattr__(ci, "_access_ttl", int(access_ttl))
+                    if refresh_ttl:
+                        object.__setattr__(ci, "_refresh_ttl", int(refresh_ttl))
+                    out[cid] = ci
                 return out
 
             def _persist_client(client_info: Any) -> None:

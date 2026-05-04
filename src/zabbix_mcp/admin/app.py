@@ -430,7 +430,7 @@ class AdminApp:
         from zabbix_mcp.admin.views.wizard import wizard_view
         from zabbix_mcp.admin.views.oauth_clients import (
             oauth_clients_list, oauth_client_detail, oauth_client_revoke,
-            oauth_client_scope_update,
+            oauth_client_scope_update, oauth_client_settings_update,
         )
 
         routes = [
@@ -478,6 +478,7 @@ class AdminApp:
             Route("/oauth-clients", oauth_clients_list, methods=["GET"]),
             Route("/oauth-clients/{client_id}", oauth_client_detail, methods=["GET"]),
             Route("/oauth-clients/{client_id}/scope", oauth_client_scope_update, methods=["POST"]),
+            Route("/oauth-clients/{client_id}/settings", oauth_client_settings_update, methods=["POST"]),
             Route("/oauth-clients/{client_id}/revoke", oauth_client_revoke, methods=["POST"]),
             Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static"),
         ]

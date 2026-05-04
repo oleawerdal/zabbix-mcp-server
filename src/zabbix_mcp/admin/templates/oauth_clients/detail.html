@@ -111,6 +111,36 @@
     {% endif %}
 </div>
 
+{% if can_edit %}
+<div class="card" style="margin-top: 16px;">
+    <h3 class="card-title">
+        Hardening
+        <span class="tooltip-icon" tabindex="0" data-tooltip="Per-client IP allowlist and TTL overrides. Both override the [oauth] global defaults; leave TTL fields empty to inherit. Active access tokens stay valid until they naturally expire; the new TTL applies to the next /token from this client.">&#x1F6C8;</span>
+    </h3>
+    <form method="post" action="/oauth-clients/{{ client.id | urlencode }}/settings">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-group">
+            <label class="form-label" for="allowed_ips">Allowed IP addresses / CIDR ranges (one per line)</label>
+            <textarea id="allowed_ips" name="allowed_ips" class="form-input" rows="3" placeholder="e.g.&#10;185.74.63.151&#10;10.0.0.0/24" style="font-family: var(--font-mono); font-size: 0.85rem;">{{ client.allowed_ips | join('\n') }}</textarea>
+            <div class="text-sm text-muted" style="margin-top: 4px;">Empty = no restriction. The check runs on /token (authorization-code exchange) so a client whose IP changes mid-session keeps its existing access token until expiry, but cannot get a fresh one without satisfying the allowlist again. CIDR notation supported (parity with [tokens.X].allowed_ips).</div>
+        </div>
+        <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 240px;">
+                <label class="form-label" for="access_token_ttl_seconds">Access token TTL (seconds)</label>
+                <input type="text" id="access_token_ttl_seconds" name="access_token_ttl_seconds" class="form-input" value="{{ client.access_token_ttl_seconds }}" placeholder="default ({{ default_access_ttl }})">
+                <div class="text-sm text-muted" style="margin-top: 4px;">60-2592000. Empty = use [oauth].access_token_ttl_seconds.</div>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 240px;">
+                <label class="form-label" for="refresh_token_ttl_seconds">Refresh token TTL (seconds)</label>
+                <input type="text" id="refresh_token_ttl_seconds" name="refresh_token_ttl_seconds" class="form-input" value="{{ client.refresh_token_ttl_seconds }}" placeholder="default ({{ default_refresh_ttl }})">
+                <div class="text-sm text-muted" style="margin-top: 4px;">60-31536000 (365 days). Empty = use [oauth].refresh_token_ttl_seconds.</div>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Save settings</button>
+    </form>
+</div>
+{% endif %}
+
 <div class="card" style="margin-top: 16px;">
     <h3 class="card-title">
         Live tokens

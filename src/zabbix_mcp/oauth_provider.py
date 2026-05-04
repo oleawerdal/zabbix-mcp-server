@@ -384,15 +384,57 @@ class ZmcpOAuthProvider:
         client: OAuthClientInformationFull,
         authorization_code: AuthorizationCode,
     ) -> OAuthToken:
+        # IP allowlist enforcement (parity with [tokens.X].allowed_ips).
+        # Read-only on the OAuthClientInformationFull object so the
+        # allowlist persists in [oauth_clients.X] config.toml without
+        # extending the framework's data model.
+        self._enforce_client_ip_allowlist(client)
         # One-shot: code is consumed even on the happy path.
         self._codes.pop(authorization_code.code, None)
         subject = getattr(authorization_code, "_subject", "anonymous")
+        # Per-client TTL override (read off OAuthClientInformationFull
+        # via the same private-attribute trick we use for subject).
+        access_ttl = self._client_access_ttl(client)
+        refresh_ttl = self._client_refresh_ttl(client)
         return self._mint_token_pair(
             client_id=str(client.client_id or ""),
             scopes=list(authorization_code.scopes),
             subject=str(subject),
             resource=authorization_code.resource,
+            access_ttl_override=access_ttl,
+            refresh_ttl_override=refresh_ttl,
         )
+
+    def _enforce_client_ip_allowlist(self, client: OAuthClientInformationFull) -> None:
+        """Raise TokenError if the calling IP is outside the client's allowlist.
+
+        The allowlist is stored as a private attribute set in
+        ``register_client`` from the optional ``allowed_ips`` field on
+        the [oauth_clients.X] config row.  Empty / missing list = no
+        restriction.  Same CIDR semantics as ``[tokens.X].allowed_ips``.
+        """
+        allowed_ips = getattr(client, "_allowed_ips", None) or []
+        if not allowed_ips:
+            return
+        from zabbix_mcp.token_store import current_client_ip
+        client_ip = current_client_ip.get()
+        if not client_ip:
+            raise TokenError("invalid_grant", "client IP allowlist is configured but caller IP is unknown")
+        try:
+            from ipaddress import ip_address, ip_network
+            addr = ip_address(client_ip)
+            if not any(addr in ip_network(c, strict=False) for c in allowed_ips):
+                raise TokenError("invalid_grant", f"client IP {client_ip} not in allowlist")
+        except (ValueError, TypeError) as exc:
+            raise TokenError("invalid_grant", f"IP allowlist evaluation failed: {exc}")
+
+    def _client_access_ttl(self, client: OAuthClientInformationFull) -> int:
+        v = getattr(client, "_access_ttl", None)
+        return int(v) if v else self._access_token_ttl
+
+    def _client_refresh_ttl(self, client: OAuthClientInformationFull) -> int:
+        v = getattr(client, "_refresh_ttl", None)
+        return int(v) if v else self._refresh_token_ttl
 
     async def load_refresh_token(
         self,
@@ -599,15 +641,19 @@ class ZmcpOAuthProvider:
         subject: str,
         resource: str | None,
         family_id: str | None = None,
+        access_ttl_override: int | None = None,
+        refresh_ttl_override: int | None = None,
     ) -> OAuthToken:
         now = int(time.time())
         access_str = _new_secret(32)
         refresh_str = _new_secret(32)
+        access_ttl = int(access_ttl_override) if access_ttl_override else self._access_token_ttl
+        refresh_ttl = int(refresh_ttl_override) if refresh_ttl_override else self._refresh_token_ttl
         access = AccessToken(
             token=access_str,
             client_id=client_id,
             scopes=scopes,
-            expires_at=now + self._access_token_ttl,
+            expires_at=now + access_ttl,
             resource=resource or self._public_url,
         )
         # Carry subject for downstream auth checks; not part of the
@@ -617,7 +663,7 @@ class ZmcpOAuthProvider:
             token=refresh_str,
             client_id=client_id,
             scopes=scopes,
-            expires_at=now + self._refresh_token_ttl,
+            expires_at=now + refresh_ttl,
         )
         self._gc(self._access_tokens, _MAX_LIVE_ACCESS_TOKENS)
         self._gc(self._refresh_tokens, _MAX_LIVE_REFRESH_TOKENS)
@@ -637,7 +683,7 @@ class ZmcpOAuthProvider:
         return OAuthToken(
             access_token=access_str,
             token_type="Bearer",
-            expires_in=self._access_token_ttl,
+            expires_in=access_ttl,
             refresh_token=refresh_str,
             scope=" ".join(scopes) if scopes else None,
         )

@@ -108,6 +108,9 @@ def _list_registered_clients(admin_app) -> list[dict]:
             "issued_human": _ts_human(body.get("client_id_issued_at")),
             "active_access_tokens": access_count,
             "active_refresh_tokens": refresh_count,
+            "allowed_ips": list(body.get("allowed_ips") or []),
+            "access_token_ttl_seconds": body.get("access_token_ttl_seconds") or "",
+            "refresh_token_ttl_seconds": body.get("refresh_token_ttl_seconds") or "",
         })
     rows.sort(key=lambda r: r["client_id_issued_at"] or 0, reverse=True)
     return rows
@@ -176,11 +179,14 @@ async def oauth_client_detail(request: Request) -> Response:
         )
 
     active_scopes = (client["scope"] or "").split() or ["*"]
+    cfg_oauth = admin_app.config.oauth
     return admin_app.render("oauth_clients/detail.html", request, {
         "active": "oauth-clients",
         "page_title": f"OAuth Client: {client['name']}",
         "client": client,
         "scope_catalog": _scope_catalog(active_scopes),
+        "default_access_ttl": cfg_oauth.access_token_ttl_seconds,
+        "default_refresh_ttl": cfg_oauth.refresh_token_ttl_seconds,
         "can_edit": session.role in ("admin", "operator"),
         "can_revoke": session.role in ("admin", "operator"),
     })
@@ -254,6 +260,142 @@ async def oauth_client_scope_update(request: Request) -> Response:
     return admin_app.flash_redirect(
         f"/oauth-clients/{client_id}",
         f"Scope updated to: {' '.join(scopes)}.",
+        flash_type="success",
+    )
+
+
+async def oauth_client_settings_update(request: Request) -> Response:
+    """POST /oauth-clients/<id>/settings -- update TTL + IP allowlist."""
+    admin_app = request.app.state.admin_app
+    session = admin_app.require_auth(request)
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+    if session.role not in ("admin", "operator"):
+        return admin_app.flash_redirect(
+            f"/oauth-clients/{request.path_params.get('client_id', '')}",
+            "You do not have permission to edit OAuth client settings.",
+            flash_type="danger",
+        )
+
+    client_id = request.path_params.get("client_id", "")
+    if not TOMLKIT_AVAILABLE:
+        return admin_app.flash_redirect(
+            "/oauth-clients",
+            "Config writer unavailable; cannot edit OAuth client settings.",
+            flash_type="danger",
+        )
+
+    form = await request.form()
+
+    # Validate IP allowlist - one CIDR / IP per line, blanks ignored.
+    raw_ips = str(form.get("allowed_ips", "") or "").strip()
+    allowed_ips: list[str] = []
+    if raw_ips:
+        from ipaddress import ip_network
+        for line in raw_ips.splitlines():
+            entry = line.strip()
+            if not entry:
+                continue
+            try:
+                ip_network(entry, strict=False)
+            except ValueError as exc:
+                return admin_app.flash_redirect(
+                    f"/oauth-clients/{client_id}",
+                    f"Invalid IP / CIDR: '{entry}' ({exc})",
+                    flash_type="danger",
+                )
+            allowed_ips.append(entry)
+
+    # Validate TTLs - blank means \"use [oauth] default\".
+    def _ttl(field: str, lower: int, upper: int) -> int | None:
+        v = str(form.get(field, "") or "").strip()
+        if not v:
+            return None
+        try:
+            n = int(v)
+        except ValueError:
+            return -1
+        if n < lower or n > upper:
+            return -1
+        return n
+
+    access_ttl = _ttl("access_token_ttl_seconds", 60, 30 * 24 * 3600)
+    if access_ttl == -1:
+        return admin_app.flash_redirect(
+            f"/oauth-clients/{client_id}",
+            "Access-token TTL must be an integer between 60 and 2592000 (30 days).",
+            flash_type="danger",
+        )
+    refresh_ttl = _ttl("refresh_token_ttl_seconds", 60, 365 * 24 * 3600)
+    if refresh_ttl == -1:
+        return admin_app.flash_redirect(
+            f"/oauth-clients/{client_id}",
+            "Refresh-token TTL must be an integer between 60 and 31536000 (365 days).",
+            flash_type="danger",
+        )
+
+    # Apply to live provider so the next /token from this client uses
+    # the new bounds without a server restart.
+    provider = admin_app.oauth_provider
+    if provider is not None:
+        ci = provider._clients.get(client_id)
+        if ci is not None:
+            object.__setattr__(ci, "_allowed_ips", list(allowed_ips))
+            if access_ttl is None:
+                if hasattr(ci, "_access_ttl"):
+                    object.__delattr__(ci, "_access_ttl")
+            else:
+                object.__setattr__(ci, "_access_ttl", access_ttl)
+            if refresh_ttl is None:
+                if hasattr(ci, "_refresh_ttl"):
+                    object.__delattr__(ci, "_refresh_ttl")
+            else:
+                object.__setattr__(ci, "_refresh_ttl", refresh_ttl)
+
+    # Persist to config.toml for restart survival.
+    try:
+        from zabbix_mcp.admin.config_writer import (
+            load_config_document, save_config_document,
+        )
+        import tomlkit
+        doc = load_config_document(admin_app.config_path)
+        section = doc.get("oauth_clients", {})
+        if client_id in section:
+            row = section[client_id]
+            row["allowed_ips"] = tomlkit.array(str(allowed_ips))
+            for key, val in (
+                ("access_token_ttl_seconds", access_ttl),
+                ("refresh_token_ttl_seconds", refresh_ttl),
+            ):
+                if val is None:
+                    if key in row:
+                        del row[key]
+                else:
+                    row[key] = val
+            save_config_document(admin_app.config_path, doc)
+    except Exception as exc:
+        logger.warning("Could not persist settings for %s: %s", client_id, exc)
+        return admin_app.flash_redirect(
+            f"/oauth-clients/{client_id}",
+            f"Failed to write settings to config: {exc}",
+            flash_type="danger",
+        )
+
+    write_audit(
+        action="oauth_client.settings_update",
+        user=session.username,
+        target_type="oauth_client",
+        target_id=client_id,
+        details={
+            "allowed_ips": allowed_ips,
+            "access_token_ttl_seconds": access_ttl,
+            "refresh_token_ttl_seconds": refresh_ttl,
+        },
+        ip=request.client.host if request.client else "",
+    )
+    return admin_app.flash_redirect(
+        f"/oauth-clients/{client_id}",
+        "Client settings updated.",
         flash_type="success",
     )
 
