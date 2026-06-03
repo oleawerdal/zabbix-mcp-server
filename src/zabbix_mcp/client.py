@@ -21,12 +21,36 @@ from __future__ import annotations
 
 import logging
 import re
+import ssl
 import threading
 import time
 from typing import Any
 
 from zabbix_utils import ZabbixAPI
 from zabbix_utils.exceptions import ProcessingError
+
+# OpenSSL 3.0 (RHEL 9, Ubuntu 22.04+) disables unsafe legacy
+# renegotiation by default. Some older Zabbix HTTPS frontends still
+# require it - see issue #51. Constant added in Python 3.12; older
+# interpreters get the raw bit value.
+_OP_LEGACY_SERVER_CONNECT = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0x4)
+
+
+def _build_ssl_context(verify_ssl: bool) -> ssl.SSLContext:
+    """Build an SSL context that honours ``verify_ssl=false`` fully.
+
+    When the operator turns verification off they want everything off
+    for that backend: cert checks AND OpenSSL 3.0's refusal to
+    renegotiate with legacy servers. Issue #51 reported the latter
+    silently breaking RHEL 9 deployments talking to older Zabbix HTTPS
+    frontends.
+    """
+    ctx = ssl.create_default_context()
+    if not verify_ssl:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.options |= _OP_LEGACY_SERVER_CONNECT
+    return ctx
 
 # zabbix_utils ships with `User-Agent: zabbix_utils/<ver>` and no
 # Origin / Referer. Cloudflare and similar WAFs that sit in front of
@@ -178,7 +202,7 @@ class ClientManager:
         timeout = getattr(srv, "request_timeout", 300) or 300
         api = ZabbixAPI(
             url=srv.url,
-            validate_certs=srv.verify_ssl,
+            ssl_context=_build_ssl_context(srv.verify_ssl),
             skip_version_check=srv.skip_version_check,
             timeout=timeout,
         )
@@ -245,7 +269,6 @@ class ClientManager:
         prior ``user.login`` call).
         """
         import json as _json
-        import ssl as _ssl
         import urllib.request as _urllib_request
         srv = self.get_server_config(server)
         url = srv.url.rstrip("/") + "/api_jsonrpc.php"
@@ -268,10 +291,7 @@ class ClientManager:
             "params": params,
             "id": 1,
         }).encode("utf-8")
-        ctx = _ssl.create_default_context()
-        if not srv.verify_ssl:
-            ctx.check_hostname = False
-            ctx.verify_mode = _ssl.CERT_NONE
+        ctx = _build_ssl_context(srv.verify_ssl)
         # ``user.checkAuthentication`` is the one method Zabbix REJECTS
         # when called WITH an Authorization header ("must be called
         # without authorization header"). The session id goes only
