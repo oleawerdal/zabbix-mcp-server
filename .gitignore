@@ -11,6 +11,7 @@ build/
 *.toml
 !config.example.toml
 !pyproject.toml
+!docker/default-config.toml
 social-preview.html
 .mcp.json
 node_modules/
