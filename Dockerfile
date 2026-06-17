@@ -49,6 +49,11 @@ RUN useradd --system --shell /usr/sbin/nologin --home-dir /opt/zabbix-mcp zabbix
 
 COPY --from=builder /opt/zabbix-mcp/venv /opt/zabbix-mcp/venv
 
+# Default config (seeded on first run when none exists) and entrypoint that
+# performs the seeding. See docker/entrypoint.sh.
+COPY --chmod=0644 docker/default-config.toml /opt/zabbix-mcp/default-config.toml
+COPY --chmod=0755 docker/entrypoint.sh /opt/zabbix-mcp/entrypoint.sh
+
 ENV PATH="/opt/zabbix-mcp/venv/bin:$PATH"
 
 USER zabbix-mcp
@@ -58,5 +63,5 @@ EXPOSE 9090
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
 
-ENTRYPOINT ["/opt/zabbix-mcp/venv/bin/zabbix-mcp-server"]
+ENTRYPOINT ["/opt/zabbix-mcp/entrypoint.sh"]
 CMD ["--config", "/etc/zabbix-mcp/config.toml"]

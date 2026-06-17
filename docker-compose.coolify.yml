@@ -2,28 +2,30 @@
 # Zabbix MCP Server — Coolify deployment
 # Copyright (C) 2026 initMAX s.r.o.
 #
-# This compose file is tailored for deployment on Coolify (and other PaaS
-# platforms that put a reverse proxy in front of your containers).
+# Tailored for Coolify (and other PaaS that put a reverse proxy in front of
+# your containers). Point your Coolify "Docker Compose" resource at this file.
 #
-# Why a separate file?
-#   The standard docker-compose.yml publishes host ports (ports:), which
-#   binds 8080/9090 directly on the Docker host. On Coolify the built-in
-#   proxy (Traefik/Caddy) already owns the public ports and routes traffic
-#   to containers internally, so publishing host ports causes a
-#   "port is already allocated / already in use" error.
+# Two things make this Coolify-friendly:
 #
-#   Here we use `expose:` instead of `ports:` — the ports are reachable by
-#   the Coolify proxy but NOT bound on the host, so there is no conflict.
-#   Coolify wires up a domain to the container using the SERVICE_FQDN_*
-#   magic environment variables below.
+#  1) Ports: uses `expose:` instead of `ports:` so the Coolify proxy routes to
+#     the container without binding 8080/9090 on the host (which collides with
+#     the proxy -> "Bind for 0.0.0.0:8080 failed: port is already allocated").
+#     Coolify wires up domains via the SERVICE_FQDN_* variables below.
 #
-# How to use on Coolify:
-#   1. Create a new resource → "Docker Compose" and point it at this file
-#      (set the compose file path to docker-compose.coolify.yml).
-#   2. Coolify auto-generates domains for the FQDN variables, or you can set
-#      your own under the service's "Domains" settings.
-#   3. Make sure config.toml exists (see config.example.toml). On Coolify you
-#      can provide it via a "File mount" mapped to /etc/zabbix-mcp/config.toml.
+#  2) Config: the server needs /etc/zabbix-mcp/config.toml. Instead of
+#     bind-mounting a host file (which does not exist in the build context on
+#     Coolify, so Docker creates a DIRECTORY there -> "Is a directory" error),
+#     we keep the whole /etc/zabbix-mcp tree on a named volume. On first start
+#     the image seeds a default config into it (see docker/entrypoint.sh), the
+#     server boots, and the admin portal auto-creates an "admin" user whose
+#     random password is printed in the container logs (WARNING level).
+#
+# First-run steps on Coolify:
+#   1. Deploy. Watch the logs for: "Generated admin password: ...".
+#   2. Open the admin portal (the domain Coolify created for port 9090) and
+#      log in as admin with that password. Change it.
+#   3. Go to Servers and point it at your real Zabbix (url + API token).
+#   4. The config persists on the named volume across redeploys.
 #
 
 services:
@@ -32,25 +34,22 @@ services:
     container_name: zabbix-mcp-server
     restart: unless-stopped
     # SERVICE_FQDN_* are Coolify "magic" variables. Coolify generates a domain
-    # for each and configures the proxy to route it to the matching exposed
-    # port. The MCP API is on 8080, the admin portal on 9090.
+    # for each and points the proxy at the matching exposed port. MCP API is on
+    # 8080, the admin portal on 9090.
     environment:
       - SERVICE_FQDN_ZABBIXMCP_8080
       - SERVICE_FQDN_ZABBIXADMIN_9090
       - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
-      - ADMIN_PORT=9090
-    # Bind to 0.0.0.0 inside the container so the proxy can reach it.
     command: ["--config", "/etc/zabbix-mcp/config.toml", "--host", "0.0.0.0", "--port", "8080"]
     # expose (not ports): reachable by the Coolify proxy, not bound on the host.
     expose:
       - "8080"
       - "9090"
+    # Whole config tree on a named volume: persistent + writable by the
+    # container user, so the admin portal can save changes and the default
+    # config can be seeded on first run.
     volumes:
-      - ./config.toml:/etc/zabbix-mcp/config.toml
-      - assets:/etc/zabbix-mcp/assets
-      - tls:/etc/zabbix-mcp/tls
-      - templates:/etc/zabbix-mcp/templates
-      - logs:/var/log/zabbix-mcp
+      - config:/etc/zabbix-mcp
     healthcheck:
       test: ["CMD", "/opt/zabbix-mcp/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
       interval: 30s
@@ -59,7 +58,4 @@ services:
       start_period: 10s
 
 volumes:
-  assets:
-  tls:
-  templates:
-  logs:
+  config:

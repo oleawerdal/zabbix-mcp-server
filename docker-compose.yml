@@ -13,19 +13,32 @@
 #   git pull
 #   docker compose up -d --build
 #
-
+# Port publishing:
+#   This base file only EXPOSES the ports to the Docker network; it does not
+#   bind them on the host. A plain `docker compose up` automatically also loads
+#   docker-compose.override.yml, which publishes the ports on the host so you
+#   can reach the server at http://127.0.0.1:8080.
+#
+#   Platforms with their own reverse proxy (Coolify, Dokploy, etc.) invoke
+#   compose with an explicit `-f docker-compose.yml`, which does NOT load the
+#   override file. That way the proxy routes to the exposed ports and there is
+#   no "port is already allocated" conflict on the host.
+#
 services:
   zabbix-mcp-server:
     build: .
     container_name: zabbix-mcp-server
     restart: unless-stopped
-    # MCP_HOST  - host interface to bind on the Docker host (default: 127.0.0.1)
-    # MCP_PORT  - port used inside the container and exposed on the Docker host (default: 8080)
+    # MCP_PORT  - port the server listens on inside the container (default: 8080)
+    # ADMIN_PORT - port for the admin web portal (default: 9090)
     # Set these in .env to override without editing this file.
     command: ["--config", "/etc/zabbix-mcp/config.toml", "--host", "0.0.0.0", "--port", "${MCP_PORT:-8080}"]
-    ports:
-      - "${MCP_HOST:-127.0.0.1}:${MCP_PORT:-8080}:${MCP_PORT:-8080}"
-      - "${MCP_HOST:-127.0.0.1}:${ADMIN_PORT:-9090}:${ADMIN_PORT:-9090}"
+    # expose makes the ports reachable inside the Docker network / to a reverse
+    # proxy, without binding them on the host. Host publishing lives in
+    # docker-compose.override.yml (loaded automatically by `docker compose up`).
+    expose:
+      - "${MCP_PORT:-8080}"
+      - "${ADMIN_PORT:-9090}"
     env_file:
       - path: .env
         required: false

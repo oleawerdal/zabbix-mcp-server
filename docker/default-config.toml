@@ -1,0 +1,43 @@
+#
+# Zabbix MCP Server — default container configuration
+# Copyright (C) 2026 initMAX s.r.o.
+#
+# This file is baked into the Docker image and copied to
+# /etc/zabbix-mcp/config.toml on first start ONLY when no config file
+# exists yet (e.g. a fresh named volume). It lets the container boot and
+# bring up the admin portal so you can finish setup from the web UI.
+#
+# It is a STARTING POINT, not a finished config:
+#   - The [zabbix.default] server below is a placeholder. The MCP tools
+#     will not work until you point it at a real Zabbix (Servers page in
+#     the admin portal, or edit this file).
+#   - On first boot the server auto-creates an "admin" user and prints a
+#     random password at WARNING level in the container logs. Use it to
+#     log in to the admin portal, then change it.
+#
+
+[server]
+# HTTP transport so MCP clients connect over a URL and the admin portal runs.
+transport = "http"
+# Bind on all interfaces inside the container so a reverse proxy (Coolify,
+# Traefik, nginx) can reach it. The container is the security boundary here.
+host = "0.0.0.0"
+port = 8080
+log_level = "info"
+# No log_file on purpose: logs go to stderr so they show up in
+# `docker logs` / the Coolify log viewer (including the first-run admin
+# password printed by the bootstrap).
+
+[admin]
+# Web administration portal (login, tokens, servers, report templates).
+enabled = true
+port = 9090
+
+# Placeholder Zabbix server so the container can start. Replace the url and
+# api_token with your real values via the admin portal (Servers page) or by
+# editing this file, then redeploy/restart.
+[zabbix.default]
+url = "https://zabbix.example.com"
+api_token = "REPLACE_WITH_YOUR_ZABBIX_API_TOKEN"
+read_only = true
+verify_ssl = true
