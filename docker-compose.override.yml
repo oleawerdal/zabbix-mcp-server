@@ -1,0 +1,26 @@
+#
+# Zabbix MCP Server — host port publishing
+# Copyright (C) 2026 initMAX s.r.o.
+#
+# This override is loaded automatically by a plain `docker compose up` and
+# publishes the server's ports on the Docker host, so you can reach it at
+# http://${MCP_HOST:-127.0.0.1}:${MCP_PORT:-8080}.
+#
+# It is intentionally kept separate from docker-compose.yml so that PaaS
+# platforms with their own reverse proxy (Coolify, Dokploy, etc.) — which run
+# compose with an explicit `-f docker-compose.yml` and therefore do NOT load
+# this override — never try to bind host ports. That avoids the
+# "Bind for 0.0.0.0:8080 failed: port is already allocated" error, because the
+# platform proxy already owns those ports and routes to the exposed ports
+# from docker-compose.yml.
+#
+# MCP_HOST   - host interface to bind on (default: 127.0.0.1, localhost only)
+# MCP_PORT   - host/container port for the MCP server (default: 8080)
+# ADMIN_PORT - host/container port for the admin portal (default: 9090)
+# Set these in .env to override.
+#
+services:
+  zabbix-mcp-server:
+    ports:
+      - "${MCP_HOST:-127.0.0.1}:${MCP_PORT:-8080}:${MCP_PORT:-8080}"
+      - "${MCP_HOST:-127.0.0.1}:${ADMIN_PORT:-9090}:${ADMIN_PORT:-9090}"
